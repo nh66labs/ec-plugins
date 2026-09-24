@@ -1,0 +1,53 @@
+# The EC plugin registry.
+#
+# A deployment reads this file, and the manifests it points at, when an EC Admin
+# opens the plugin catalogue or installs a plugin. It reads NOTHING ELSE from
+# here, and nothing served from this repository is ever executed: connector code
+# lives in the platform's own build, and this index only says which release first
+# carried each one, so a deployment can tell an admin what it is missing.
+registry_version: 1
+
+plugins:
+  - plugin_id: gtm
+    name: Go-to-market
+    summary: Finds and qualifies leads, and drafts the outreach to them.
+    version: 0.1.0
+    manifest: plugins/gtm/manifest.yaml
+    requires:
+      connectors: [apollo, hubspot, brevo]
+      # The release that first carried all three. A deployment older than this
+      # lists the plugin and says which release it is waiting for, rather than
+      # offering an install that could only half-work.
+      min_platform: "2026.11"
+
+connectors:
+  - connector_id: apollo
+    name: Apollo
+    summary: Searches for companies and people, and reveals their contact details.
+    ingests: false
+    since_platform: "2026.11"
+  - connector_id: hubspot
+    name: HubSpot
+    summary: Reads the contacts and companies a CRM already holds.
+    ingests: false
+    since_platform: "2026.11"
+  - connector_id: brevo
+    name: Brevo
+    summary: Reads what happened to a sent email — delivered, opened, clicked, bounced.
+    ingests: false
+    since_platform: "2026.11"
+  - connector_id: github
+    name: GitHub
+    summary: Reads a repository's code, issues and pull requests.
+    ingests: true
+    since_platform: "2026.09"
+  - connector_id: slack
+    name: Slack
+    summary: Reads a channel's messages and threads.
+    ingests: true
+    since_platform: "2026.09"
+  - connector_id: jira
+    name: Jira
+    summary: Reads a project's issues and their comments.
+    ingests: true
+    since_platform: "2026.09"

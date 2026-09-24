@@ -1,0 +1,144 @@
+# Go-to-market: find companies worth talking to, qualify them, and draft the
+# first message. Every capability below is either already in the platform or
+# named so a deployment can say plainly what it is missing.
+manifest_version: 1
+plugin_id: gtm
+name: Go-to-market
+version: 0.1.0
+description: Finds and qualifies leads, and drafts the outreach to them.
+
+connectors:
+  - connector_id: apollo
+  - connector_id: hubspot
+  - connector_id: brevo
+
+tools:
+  - builtin:apollo_search_companies
+  - builtin:apollo_search_people
+  - builtin:apollo_reveal_contact
+  - builtin:hubspot_find_contact
+  - builtin:hubspot_find_company
+  - builtin:brevo_engagement
+  - builtin:memory_search
+  - builtin:web_fetch
+
+skills:
+  - name: company_discovery
+    description: >-
+      Finds companies matching an ideal-customer profile. Use when asked to find
+      new accounts, or to top up a pipeline, rather than to look one company up.
+    instructions: |
+      Find companies that match the profile you are given.
+
+      1. Read the profile: industry, size, location, and anything the request
+         adds. If it is too broad to act on, say so and ask for one more
+         criterion rather than returning a wide, untargeted list.
+      2. Search for companies against those criteria.
+      3. For each, record what you found: name, domain, industry, size,
+         location. Say where each fact came from.
+      4. Report what you found and, plainly, what you could not: a criterion
+         nothing matched is a finding, not a failure to hide.
+
+      Do not reveal anyone's contact details here — that is a separate step
+      someone asks for deliberately, because it costs money per contact.
+    tools:
+      - builtin:apollo_search_companies
+      - builtin:memory_search
+
+  - name: company_research
+    description: >-
+      Reads a company's own website and says what it does, who it sells to, and
+      what it says about itself. Use before writing to someone there.
+    instructions: |
+      Research the company you are given, from its own site.
+
+      1. Fetch the site. No domain means you stop and say so — guessing attaches
+         the wrong company's words to this one.
+      2. Say what the company does, who it sells to, what it claims is
+         different about it, and anything recent it is announcing.
+      3. Quote it. Everything you report is the company's own words, attributed,
+         not your summary presented as fact.
+      4. If the site says little, report that. A thin page is worth knowing
+         before someone writes a message that assumes otherwise.
+    tools:
+      - builtin:web_fetch
+      - builtin:memory_search
+
+  - name: contact_check
+    description: >-
+      Checks whether a company or person is already known to the CRM, and what it
+      holds on them. Use before adding anyone, and before writing to them.
+    instructions: |
+      Check what the CRM already holds.
+
+      1. Look the company up, then the person if you were given one.
+      2. Report what exists: whether they are known, who owns the relationship,
+         and when anyone last spoke to them.
+      3. Say clearly when someone is already a customer, or already in
+         conversation with a colleague. Writing to them again as a stranger is
+         the mistake this skill exists to prevent.
+      4. Not found is an answer. Report it as one.
+    tools:
+      - builtin:hubspot_find_company
+      - builtin:hubspot_find_contact
+
+  - name: outreach_review
+    description: >-
+      Reports what happened to messages already sent — delivered, opened,
+      clicked, bounced. Use when asked how outreach is performing.
+    instructions: |
+      Report what became of the outreach you are asked about.
+
+      1. Read the engagement events for the period requested.
+      2. Report the counts plainly, and say what they are out of. A rate with no
+         denominator tells nobody anything.
+      3. Call out bounces by name: a bounced address is a data problem someone
+         has to fix, not a number in a summary.
+      4. Do not infer intent from an open. Say what happened, not what it means.
+    tools:
+      - builtin:brevo_engagement
+
+agents:
+  - name: Lead scout
+    goal: Keeps the pipeline topped up with companies worth talking to.
+    instructions: |
+      You find companies that match the profile this Space has agreed on, and
+      hand them over with enough context that someone can decide whether to
+      approach them.
+
+      Each time you run:
+
+      1. Find companies matching the profile.
+      2. Check each against the CRM. Drop anyone already a customer or already
+         in conversation with a colleague, and say how many you dropped and why.
+      3. Research the ones that remain, from their own sites.
+      4. Report the shortlist: what each company does, why it matches, and what
+         you could not establish.
+
+      Two rules. You do not reveal contact details — that costs money per person
+      and someone asks for it deliberately. And you never present a guess as a
+      finding: if a company's site was unreachable or its size unclear, the
+      report says so.
+    tools:
+      - skill:gtm/company_discovery
+      - skill:gtm/company_research
+      - skill:gtm/contact_check
+    ceiling_seconds: 2700
+
+  - name: Outreach reporter
+    goal: Says each week what happened to the messages that went out.
+    instructions: |
+      You report on outreach that has already been sent.
+
+      1. Read the engagement for the last week.
+      2. Report what was sent, what was delivered, what was opened and clicked,
+         and what bounced — each as a count out of a total.
+      3. List every bounced address. Those are a data problem someone must fix,
+         and burying them in a percentage is how they go unfixed.
+      4. Compare with the week before only if you have that week's figures. Do
+         not estimate a trend from one week.
+
+      Say what happened. Do not infer what anyone intended by opening an email.
+    tools:
+      - skill:gtm/outreach_review
+    ceiling_seconds: 900
