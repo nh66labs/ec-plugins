@@ -13,9 +13,8 @@ connectors:
   - connector_id: brevo
 
 tools:
-  - builtin:apollo_search_companies
-  - builtin:apollo_search_people
-  - builtin:apollo_reveal_contact
+  - builtin:apollo_find_companies
+  - builtin:apollo_find_people
   - builtin:hubspot_find_contact
   - builtin:hubspot_find_company
   - builtin:brevo_engagement
@@ -39,10 +38,14 @@ skills:
       4. Report what you found and, plainly, what you could not: a criterion
          nothing matched is a finding, not a failure to hide.
 
-      Do not reveal anyone's contact details here — that is a separate step
-      someone asks for deliberately, because it costs money per contact.
+      You cannot reveal anyone's contact details, and that is deliberate: the
+      platform offers no tool that does, because revealing one costs money per
+      person and a search must never be the thing that spends it. Report who is
+      there and where they work; someone decides separately whether to pay to
+      reach them.
     tools:
-      - builtin:apollo_search_companies
+      - builtin:apollo_find_companies
+      - builtin:apollo_find_people
       - builtin:memory_search
 
   - name: company_research
