@@ -119,10 +119,10 @@ agents:
       and someone asks for it deliberately. And you never present a guess as a
       finding: if a company's site was unreachable or its size unclear, the
       report says so.
-    tools:
-      - skill:gtm/company_discovery
-      - skill:gtm/company_research
-      - skill:gtm/contact_check
+    skills:
+      - company_discovery
+      - company_research
+      - contact_check
     ceiling_seconds: 2700
 
   - name: Outreach reporter
@@ -139,6 +139,6 @@ agents:
          not estimate a trend from one week.
 
       Say what happened. Do not infer what anyone intended by opening an email.
-    tools:
-      - skill:gtm/outreach_review
+    skills:
+      - outreach_review
     ceiling_seconds: 900
