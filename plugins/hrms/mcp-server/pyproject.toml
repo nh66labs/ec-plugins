@@ -1,0 +1,41 @@
+[project]
+name = "hrms-mcp-server"
+version = "0.3.0"
+description = "The HRMS plugin's MCP server: leave tools for Enterprise Claw, in front of the HRMS."
+requires-python = ">=3.13"
+dependencies = [
+  "mcp>=2.2,<3",
+  "httpx>=0.27,<1",
+  "pydantic-settings>=2.4,<3",
+  "uvicorn>=0.30,<1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+# E/W pycodestyle, F pyflakes, I import order, UP modernize, B bugbear, S bandit
+# — the same set the platform lints with.
+select = ["E", "W", "F", "I", "UP", "B", "S"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["hrms_mcp", "tests"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests assert (S101) and carry fake credentials (S105/S106) by design.
+"tests/*" = ["S101", "S105", "S106"]

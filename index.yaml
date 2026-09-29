@@ -19,6 +19,25 @@ plugins:
       # lists the plugin and says which release it is waiting for, rather than
       # offering an install that could only half-work.
       min_platform: "2026.11"
+  - plugin_id: hrms
+    name: HRMS
+    summary: Takes and decides leave requests in the company's HRMS, as the person asking.
+    version: 0.3.0
+    manifest: plugins/hrms/manifest.yaml
+    requires:
+      connectors: []
+      # Not in the build: a server an operator runs beside the platform. It never
+      # blocks an install; the plugin says it is waiting until it is connected.
+      mcp_servers: [hrms]
+
+# MCP servers a plugin needs running beside the platform. Named here so the
+# catalogue can say what to run; nothing here is fetched or executed.
+mcp_servers:
+  - server_id: hrms
+    name: HRMS MCP server
+    summary: Leave tools in front of the HRMS — read, file and decide — acting as the person asking.
+    source: plugins/hrms/mcp-server
+    image: ghcr.io/nh66labs/ec-hrms-mcp:0.3.0
 
 connectors:
   - connector_id: apollo

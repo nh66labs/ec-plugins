@@ -1,0 +1,30 @@
+# HRMS: answers leave and holiday questions from the company's HRMS, as the
+# person asking. Its tools live on the plugin's own MCP server
+# (plugins/hrms/mcp-server/, run beside the platform), which forwards each call
+# to the HRMS with the signed identity of whoever asked — so the HRMS, not the
+# platform, decides what they may see.
+manifest_version: 2
+plugin_id: hrms
+name: HRMS
+version: 0.3.0
+description: Takes and decides leave requests, and answers leave and holiday questions, in the company's HRMS — as the person asking.
+
+mcp_servers:
+  - server_id: hrms
+    name: HRMS
+    auth_mode: signed_identity
+    lookup_path: /people/lookup
+    tools:
+      # Reads: run in the turn.
+      - get_leave_context
+      - start_leave_request
+      - get_holidays
+      - get_my_leave_balance
+      - list_my_leaves
+      - preview_leave
+      - list_leave_requests_to_decide
+      # Writes: each proposed to the person, and run only once they confirm.
+      - apply_leave
+      - cancel_my_leave
+      - approve_leave
+      - reject_leave
