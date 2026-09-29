@@ -1,5 +1,7 @@
-# Serves index.yaml and the manifests as static files. Nothing is built and
-# nothing is compiled: what is committed is what is served.
+# Serves index.yaml and the manifests as static files, and nothing else. The
+# repository may also hold a plugin's MCP server source; that is built into an
+# image by its own workflow and is never served — so what is uploaded is a
+# staged directory holding only YAML, checked before it is published.
 name: pages
 
 on:
@@ -28,6 +30,8 @@ jobs:
         run: pip install pyyaml
       - name: Every manifest parses, and the index points at files that exist
         run: python scripts/check_registry.py
+      - name: What would be served is the index and the manifests, nothing else
+        run: python scripts/stage_site.py _site
 
   deploy:
     needs: check
@@ -37,9 +41,14 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Stage the index and the manifests, and only those
+        run: python scripts/stage_site.py _site
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: _site
       - id: deployment
         uses: actions/deploy-pages@v4

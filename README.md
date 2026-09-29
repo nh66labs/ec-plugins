@@ -13,14 +13,24 @@ nothing else from here.
 index.yaml                  every published plugin and connector
 plugins/<plugin_id>/
     manifest.yaml           one plugin, declared in full
+    mcp-server/             optional: the source of an MCP server the plugin
+                            needs — built into an image, never served
 ```
 
-## What this repository does not contain
+## What is served, and what is not
 
-**No code, and nothing that runs.** Everything served from here is data that a
-deployment parses, checks and shows before it writes anything. Connector code —
-the part that actually talks to Apollo, HubSpot or a CRM — ships inside the
-platform's own build, reviewed and released like any other change.
+**Only data is served.** Pages publishes `index.yaml` and each
+`plugins/<plugin_id>/manifest.yaml` — data a deployment parses, checks and
+shows before it writes anything — and nothing else. `scripts/stage_site.py`
+stages exactly those files and fails the build if anything more would be
+published, so this holds by check rather than by care.
+
+**Code may live here, but is never served.** Connector code — the part that
+talks to Apollo, HubSpot or a CRM — ships inside the platform's own build. A
+plugin that needs an MCP server of its own keeps that server's source beside its
+manifest, in `mcp-server/`; its workflow tests it and builds a container image,
+which an operator runs beside the platform. A deployment never downloads that
+source or that image.
 
 This is deliberate, and it is the reason the registry can be public. A file
 served from here cannot become code running inside a customer's deployment
@@ -38,7 +48,12 @@ offering an install that could only half-work.
 3. Open a pull request. A manifest is checked on the way in.
 
 A manifest declares its connectors by id, every tool its skills and agents use,
-and those skills and agents in full. It **never** contains a credential, a token,
+and those skills and agents in full. A plugin whose tools live on an MCP server
+uses `manifest_version: 2` and declares the server under `mcp_servers` — its id,
+its name, the tools it uses there and, if the server is told who is asking, its
+`lookup_path` — and its index entry lists that id under `requires.mcp_servers`,
+with the server itself under the index's root `mcp_servers` (its name and the
+image to run). `plugins/hrms/` is the example. It **never** contains a credential, a token,
 a key, or a model name — which model an agent runs on is the deployment
 administrator's decision, not this repository's.
 
