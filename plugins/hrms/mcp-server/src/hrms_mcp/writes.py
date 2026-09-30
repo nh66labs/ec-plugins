@@ -28,6 +28,7 @@ from hrms_mcp.tools import (
     _ask,
     _identity,
     kind_of,
+    manager_named,
     portion_of,
     same_kind,
     when_of,
@@ -154,13 +155,12 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         )
         chosen = None
         if approver.strip():
-            wanted = approver.strip().lower()
-            chosen = next((m for m in managers if m.get("name", "").lower() == wanted), None)
-            if chosen is None:
-                chosen = next((m for m in managers if wanted in m.get("name", "").lower()), None)
+            chosen = manager_named(managers, approver)
             if chosen is None:
                 names = ", ".join(m.get("name", "") for m in managers) or "none"
-                raise ToolError(f"{approver} is not one of their project managers ({names}).")
+                raise ToolError(
+                    f"{approver} does not name exactly one of their project managers ({names})."
+                )
             arguments["project_manager_id"] = chosen["id"]
         elif len(managers) == 1:
             chosen = managers[0]

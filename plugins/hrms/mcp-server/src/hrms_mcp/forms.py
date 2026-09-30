@@ -25,7 +25,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
 from hrms_mcp.hrms import Hrms
-from hrms_mcp.tools import _ask, kind_of, portion_of, when_of
+from hrms_mcp.tools import _ask, kind_of, manager_named, portion_of, when_of
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False)
 
@@ -123,8 +123,7 @@ def register(server: MCPServer, hrms: Hrms) -> None:
             "project_managers", []
         )
         if len(managers) > 1:
-            wanted = approver.strip().lower()
-            named = next((m for m in managers if wanted and wanted in m["name"].lower()), None)
+            named = manager_named(managers, approver)
             if named is not None:
                 known["approver"] = named["name"]
             else:

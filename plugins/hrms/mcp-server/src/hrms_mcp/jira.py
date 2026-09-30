@@ -22,8 +22,11 @@ from hrms_mcp.workload import ProjectWork, Sprint, Ticket
 log = logging.getLogger("hrms_mcp.jira")
 
 _FIELDS = "summary,status,assignee,duedate"
-#: Enough for a team's open work; a project with more is warned about from these.
-_LIMIT = 100
+#: Tickets read per project or sprint, across pages; past this the warning is
+#: made from what was read.
+_LIMIT = 1000
+#: Jira Cloud caps a page at 50 on the agile endpoints and 100 on search.
+_PAGE = 50
 
 
 def _date(value: Any) -> date | None:
@@ -86,6 +89,39 @@ class Jira:
         response.raise_for_status()
         return response.json()
 
+    async def _sprint_issues(self, http: httpx.AsyncClient, sprint_id: Any) -> list[Any]:
+        """Every issue in a sprint, page by page — the endpoint gives 50 at most."""
+        issues: list[Any] = []
+        while len(issues) < _LIMIT:
+            page = await self._get(
+                http,
+                f"/rest/agile/1.0/sprint/{sprint_id}/issue",
+                {"fields": _FIELDS, "startAt": len(issues), "maxResults": _PAGE},
+            )
+            got = page.get("issues") or []
+            issues.extend(got)
+            if not got or len(issues) >= int(page.get("total") or 0):
+                break
+        return issues
+
+    async def _open_issues(self, http: httpx.AsyncClient, key: str) -> list[Any]:
+        """Every open issue in a project, page by page, so the asker's own are
+        found however many the project has."""
+        issues: list[Any] = []
+        params: dict[str, Any] = {
+            "jql": f'project = "{key}" AND statusCategory != Done',
+            "fields": _FIELDS,
+            "maxResults": 100,
+        }
+        while len(issues) < _LIMIT:
+            page = await self._get(http, "/rest/api/3/search/jql", params)
+            issues.extend(page.get("issues") or [])
+            token = page.get("nextPageToken")
+            if page.get("isLast", True) or not token:
+                break
+            params = {**params, "nextPageToken": token}
+        return issues
+
     async def _sprint(self, http: httpx.AsyncClient, key: str) -> Sprint | None:
         boards = await self._get(http, "/rest/agile/1.0/board", {"projectKeyOrId": key})
         for board in boards.get("values") or []:
@@ -96,31 +132,18 @@ class Jira:
                 ends = _date(sprint.get("endDate"))
                 if ends is None:
                     continue
-                issues = await self._get(
-                    http,
-                    f"/rest/agile/1.0/sprint/{sprint['id']}/issue",
-                    {"fields": _FIELDS, "maxResults": 200},
-                )
+                issues = await self._sprint_issues(http, sprint["id"])
                 return Sprint(
                     name=str(sprint.get("name") or "the sprint"),
                     ends=ends,
-                    tickets=[ticket_of(i) for i in issues.get("issues") or []],
+                    tickets=[ticket_of(i) for i in issues],
                 )
         return None
 
     async def _project(self, http: httpx.AsyncClient, key: str) -> ProjectWork:
-        found = await self._get(
-            http,
-            "/rest/api/3/search/jql",
-            {
-                "jql": f'project = "{key}" AND statusCategory != Done',
-                "fields": _FIELDS,
-                "maxResults": _LIMIT,
-            },
-        )
         return ProjectWork(
             key=key,
-            open_tickets=[ticket_of(i) for i in found.get("issues") or []],
+            open_tickets=[ticket_of(i) for i in await self._open_issues(http, key)],
             sprint=await self._sprint(http, key),
         )
 

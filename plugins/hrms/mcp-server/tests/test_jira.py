@@ -124,6 +124,7 @@ class FakeJira:
             _issue(f"ECP-{i}", "Bala", "done") for i in range(7, 11)
         ]
         self.refuse = False
+        self.paged = False
         self.paths: list[str] = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
@@ -132,6 +133,13 @@ class FakeJira:
             return httpx.Response(401)
         path = request.url.path
         if path == "/rest/api/3/search/jql":
+            if self.paged:
+                token = request.url.params.get("nextPageToken")
+                first = token is None
+                return httpx.Response(200, json={
+                    "issues": self.open[:1] if first else self.open[1:],
+                    "isLast": not first, **({"nextPageToken": "p2"} if first else {}),
+                })
             return httpx.Response(200, json={"issues": self.open})
         if path == "/rest/agile/1.0/board":
             return httpx.Response(200, json={"values": [{"id": 7}]})
@@ -140,6 +148,11 @@ class FakeJira:
                 {"id": 70, "name": "Sprint 14", "endDate": "2026-10-05T10:00:00.000Z"},
             ]})
         if path == "/rest/agile/1.0/sprint/70/issue":
+            if self.paged:
+                start = int(request.url.params.get("startAt", 0))
+                return httpx.Response(200, json={
+                    "issues": self.sprint[start:start + 4], "total": len(self.sprint),
+                })
             return httpx.Response(200, json={"issues": self.sprint})
         return httpx.Response(404)
 
@@ -161,6 +174,14 @@ def test_a_project_is_read_with_its_active_sprint() -> None:
     assert [t.key for t in work.open_tickets] == ["ECP-1", "ECP-2"]
     assert work.sprint is not None and work.sprint.ends == MON
     assert len(work.sprint.tickets) == 10
+
+
+def test_every_page_of_open_work_and_the_sprint_is_read() -> None:
+    fake = FakeJira()
+    fake.paged = True
+    (work,) = asyncio.run(Jira(_settings(), httpx.MockTransport(fake.handler)).work(["ECP"]))
+    assert [t.key for t in work.open_tickets] == ["ECP-1", "ECP-2"]
+    assert work.sprint is not None and len(work.sprint.tickets) == 10
 
 
 def test_a_jira_that_refuses_is_skipped_not_failed() -> None:
