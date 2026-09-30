@@ -14,6 +14,7 @@ HRMS's own tools, and they are the reason this server exists:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date
 from typing import Any, Literal
@@ -31,7 +32,7 @@ log = logging.getLogger("hrms_mcp")
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False)
 
 #: The HRMS's leave-type codes that are certain; any other is shown as given.
-LEAVE_TYPES = {"CL": "Casual leave", "SL": "Sick leave"}
+LEAVE_TYPES = {"CL": "Casual leave", "SL": "Sick leave", "FL": "Floating leave"}
 
 #: What the HRMS accepts, by its own names.
 LeaveType = Literal["Casual Leave", "Sick Leave", "Floating Leave"]
@@ -107,6 +108,19 @@ def kind_of(value: str) -> str:
     """A leave type as a person reads it: ``CL`` → "Casual leave"."""
     value = str(value or "").strip()
     return LEAVE_TYPES.get(value, value[:1].upper() + value[1:].lower() if value else "Leave")
+
+
+def manager_named(managers: list[dict[str, Any]], name: str) -> dict[str, Any] | None:
+    """The one project manager a name means: an exact match, else the only one
+    whose name contains it. Two that contain it, or none, is None — ask instead."""
+    wanted = name.strip().lower()
+    if not wanted:
+        return None
+    exact = [m for m in managers if str(m.get("name", "")).lower() == wanted]
+    if exact:
+        return exact[0] if len(exact) == 1 else None
+    partial = [m for m in managers if wanted in str(m.get("name", "")).lower()]
+    return partial[0] if len(partial) == 1 else None
 
 
 def same_kind(a: str, b: str) -> bool:
@@ -392,9 +406,12 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
             raise ToolError(str(error)) from None
         if not leaves:
             return f"No leave requests are {status.lower()} for you to decide."
-        lines = []
-        for item in leaves[:DECIDE_LIMIT]:
-            lines.append(await describe_request(hrms, ctx, item))
+        # Side by side: one after another, 20 lookups could outlast the call.
+        lines = list(
+            await asyncio.gather(
+                *(describe_request(hrms, ctx, item) for item in leaves[:DECIDE_LIMIT])
+            )
+        )
         more = len(leaves) - DECIDE_LIMIT
         if more > 0:
             lines.append(f"…and {more} more not shown.")

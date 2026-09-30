@@ -475,7 +475,24 @@ def test_the_named_approver_is_sent_by_id(client: TestClient, hrms: FakeHrms) ->
     [filed] = [c for c in hrms.calls() if c["name"] == "apply_leave"]
     assert filed["arguments"]["project_manager_id"] == "b"
     refused = call(client, "apply_leave", {**APPLY, "approver": "Maya"})
-    assert refused["isError"] is True and "not one of their project managers" in text(refused)
+    assert refused["isError"] is True and "exactly one of their project managers" in text(refused)
+
+
+def test_an_approver_is_matched_exactly_before_by_part_of_a_name() -> None:
+    from hrms_mcp.tools import manager_named
+
+    managers = [{"id": "k", "name": "Karuna"}, {"id": "a", "name": "Arun"}]
+    assert manager_named(managers, "Arun") == {"id": "a", "name": "Arun"}, "not Karuna"
+    assert manager_named(managers, "karu") == {"id": "k", "name": "Karuna"}
+    assert manager_named(managers, "a") is None, "both contain it, so ask"
+    assert manager_named(managers, "  ") is None
+
+
+def test_floating_leave_is_known_by_its_code() -> None:
+    from hrms_mcp.tools import same_kind
+
+    assert same_kind("FL", "Floating Leave")
+    assert not same_kind("FL", "Casual Leave")
 
 
 def test_a_request_without_a_reason_is_refused(client: TestClient, hrms: FakeHrms) -> None:
