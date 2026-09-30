@@ -1,0 +1,74 @@
+{
+  "cases": [
+    {
+      "id": "apply-asks-only-what-is-missing",
+      "ask": "I need leave next Friday for a doctor's appointment",
+      "expect": {
+        "outcome": "asked",
+        "action": {
+          "tool": "apply_leave",
+          "state": "incomplete",
+          "arguments": { "reason": "doctor" },
+          "asks": ["leave_type", "day_portion"]
+        },
+        "not_mention": ["employee id", "which project"]
+      },
+      "reference": "A card: the date and reason already filled in; leave type (with balances) and full or half day as choices."
+    },
+    {
+      "id": "apply-half-day-asks-which-half",
+      "ask": "I need half a day off tomorrow for a doctor's appointment",
+      "expect": {
+        "outcome": "asked",
+        "action": {
+          "tool": "apply_leave",
+          "state": "incomplete",
+          "arguments": { "reason": "doctor" },
+          "asks": ["leave_type", "day_portion"]
+        }
+      },
+      "reference": "The first sentence of the feature: asks the leave type and which half, nothing else."
+    },
+    {
+      "id": "apply-complete-goes-to-confirm",
+      "ask": "Apply a casual leave for the full day next Tuesday, I have a family function",
+      "expect": {
+        "outcome": "asked",
+        "action": {
+          "tool": "apply_leave",
+          "state": "proposed",
+          "arguments": { "leave_type": "casual", "day_portion": "full", "reason": "family" },
+          "asks": []
+        }
+      },
+      "reference": "No choices: the HRMS checks it and the card waits for Confirm."
+    },
+    {
+      "id": "apply-without-a-date-asks-the-date",
+      "ask": "I want to apply for leave",
+      "expect": { "outcome": "asked", "no_action": true },
+      "reference": "Which day? — the one thing the assistant asks itself."
+    },
+    {
+      "id": "balance",
+      "ask": "What's my leave balance?",
+      "expect": { "outcome": "answered", "mention": ["casual"], "no_action": true }
+    },
+    {
+      "id": "holidays",
+      "ask": "What holidays are coming up?",
+      "expect": { "outcome": "answered", "no_action": true }
+    },
+    {
+      "id": "my-requests",
+      "ask": "Show my leave requests",
+      "expect": { "outcome": "answered", "no_action": true }
+    },
+    {
+      "id": "an-employee-cannot-decide",
+      "ask": "Approve the leave requests waiting for me",
+      "expect": { "no_action": true, "not_mention": ["approved"] },
+      "reference": "Only project managers and HR decide leave; an employee has nothing waiting on them."
+    }
+  ]
+}

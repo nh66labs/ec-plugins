@@ -388,6 +388,53 @@ def test_preview_files_nothing_and_says_so(client: TestClient, hrms: FakeHrms) -
     }
 
 
+def _overlap(client: TestClient, hrms: FakeHrms, names: list[str]) -> str:
+    hrms.results["preview_leave"] = {
+        "effective_days": 1,
+        "created": False,
+        "facts": {"team_leaves": {"team_size": 4, "overlap_count": len(names),
+                                  "on_leave_names": names}},
+        "briefing": [
+            "Calendar: no meetings that day.",
+            *([f"Team: {len(names)} teammate(s) on leave that day: {names}."] if names else []),
+            "Balance: 10.0 Casual Leave day(s) available; this request uses 1.0.",
+        ],
+    }
+    return text(call(client, "preview_leave", {
+        "leave_type": "Casual Leave", "date_from": "2026-10-02", "day_portion": "Full Day",
+    }))
+
+
+def test_a_teammate_already_off_is_warned_of_first(client: TestClient, hrms: FakeHrms) -> None:
+    said = _overlap(client, hrms, ["Anu"])
+    assert said.splitlines()[0] == (
+        "Heads-up: Anu has already applied for leave on Fri 2 Oct 2026, so it may be "
+        "difficult to approve. Do you still want to apply?"
+    )
+    assert "Team:" not in said  # said once, not twice
+    assert "Calendar: no meetings that day." in said and "Balance: 10.0" in said
+    assert "Nothing has been filed." in said
+
+
+def test_no_teammate_off_means_no_warning(client: TestClient, hrms: FakeHrms) -> None:
+    said = _overlap(client, hrms, [])
+    assert "Heads-up" not in said
+    assert said.startswith("Casual leave, Fri 2 Oct 2026, full day")
+
+
+def test_several_teammates_are_all_named(client: TestClient, hrms: FakeHrms) -> None:
+    assert "Anu and Bala have already applied" in _overlap(client, hrms, ["Anu", "Bala"])
+    three = _overlap(client, hrms, ["Anu", "Bala", "Chitra"])
+    assert "3 teammates (Anu, Bala and Chitra) have" in three
+
+
+def test_the_instructions_say_a_warning_is_not_a_refusal() -> None:
+    from hrms_mcp.tools import INSTRUCTIONS
+
+    said = " ".join(INSTRUCTIONS.split())
+    assert "it is a warning, not a refusal" in said
+
+
 # --- applying ---------------------------------------------------------------------------
 
 

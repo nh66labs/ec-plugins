@@ -29,8 +29,13 @@ published, so this holds by check rather than by care.
 talks to Apollo, HubSpot or a CRM — ships inside the platform's own build. A
 plugin that needs an MCP server of its own keeps that server's source beside its
 manifest, in `mcp-server/`; its workflow tests it and builds a container image,
-which an operator runs beside the platform. A deployment never downloads that
-source or that image.
+and on `main` publishes it to `ghcr.io/nh66labs/ec-<server>-mcp:<version>` —
+the name `index.yaml` gives it, which `check_registry.py` holds equal to the
+server's version. A published version is never overwritten. An operator runs
+that image beside the platform; a deployment never downloads it itself.
+
+A plugin may keep **evaluation cases** in `evals/` — the sentences it exists
+for, graded by the platform's evaluation run (`plugins/hrms/evals/README.md`).
 
 This is deliberate, and it is the reason the registry can be public. A file
 served from here cannot become code running inside a customer's deployment

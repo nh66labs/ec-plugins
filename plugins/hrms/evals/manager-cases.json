@@ -1,0 +1,30 @@
+{
+  "cases": [
+    {
+      "id": "requests-waiting",
+      "ask": "Any leave requests waiting for me?",
+      "expect": { "outcome": "answered", "no_action": true }
+    },
+    {
+      "id": "reject-takes-the-reason-from-the-sentence",
+      "ask": "Reject the oldest leave request waiting for me because we have a deployment that day",
+      "expect": {
+        "outcome": "acted",
+        "action": { "tool": "reject_leave", "state": "proposed", "arguments": { "reason": "deployment" } },
+        "not_mention": ["what is the reason"]
+      },
+      "reference": "A rejection card with the reason already in it; nothing asked."
+    },
+    {
+      "id": "reject-without-a-reason-asks-for-one",
+      "ask": "Reject the oldest leave request waiting for me",
+      "expect": { "outcome": "asked", "no_action": true },
+      "reference": "Asks why — a rejection is never sent without a reason."
+    },
+    {
+      "id": "approve",
+      "ask": "Approve the oldest leave request waiting for me",
+      "expect": { "outcome": "acted", "action": { "tool": "approve_leave", "state": "proposed" } }
+    }
+  ]
+}

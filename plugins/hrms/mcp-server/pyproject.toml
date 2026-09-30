@@ -1,6 +1,6 @@
 [project]
 name = "hrms-mcp-server"
-version = "0.3.0"
+version = "0.4.0"
 description = "The HRMS plugin's MCP server: leave tools for Enterprise Claw, in front of the HRMS."
 requires-python = ">=3.13"
 dependencies = [

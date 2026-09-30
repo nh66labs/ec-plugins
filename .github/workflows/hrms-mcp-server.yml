@@ -1,24 +1,26 @@
-# The HRMS plugin's MCP server: lint, test and build its image. Publishing the
-# image waits on choosing a container registry; until then CI proves it builds.
+# The HRMS plugin's MCP server: lint, test and build its image on every change;
+# on main, publish it to the GitHub Container Registry under the name and
+# version index.yaml gives it — which the registry check holds equal to the
+# server's own version. A version already published is never overwritten.
 name: hrms-mcp-server
 
 on:
   push:
     branches: [main]
-    paths: ["plugins/hrms/mcp-server/**", ".github/workflows/hrms-mcp-server.yml"]
+    paths: ["plugins/hrms/mcp-server/**", "index.yaml", ".github/workflows/hrms-mcp-server.yml"]
   pull_request:
-    paths: ["plugins/hrms/mcp-server/**", ".github/workflows/hrms-mcp-server.yml"]
+    paths: ["plugins/hrms/mcp-server/**", "index.yaml", ".github/workflows/hrms-mcp-server.yml"]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-defaults:
-  run:
-    working-directory: plugins/hrms/mcp-server
-
 jobs:
   check:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/hrms/mcp-server
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,3 +34,47 @@ jobs:
         run: python -m pytest -q
       - name: The image builds
         run: docker build -t hrms-mcp-server:ci .
+
+  publish:
+    needs: check
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: The index and the server agree on the version
+        run: |
+          pip install pyyaml
+          python scripts/check_registry.py
+      - name: The image the index names
+        id: image
+        run: |
+          python - <<'EOF' >> "$GITHUB_OUTPUT"
+          import yaml
+          index = yaml.safe_load(open("index.yaml"))
+          (server,) = [s for s in index["mcp_servers"] if s["server_id"] == "hrms"]
+          print(f"ref={server['image']}")
+          EOF
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push, unless this version is already published
+        env:
+          REF: ${{ steps.image.outputs.ref }}
+        run: |
+          if docker manifest inspect "$REF" > /dev/null 2>&1; then
+            echo "$REF is already published; bump the server's version to publish a change."
+            exit 0
+          fi
+          docker build \
+            --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+            --label "org.opencontainers.image.description=The HRMS plugin's MCP server" \
+            -t "$REF" plugins/hrms/mcp-server
+          docker push "$REF"

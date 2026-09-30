@@ -24,3 +24,20 @@ class Settings(BaseSettings):
     #: Kept well under Enterprise Claw's 45-second limit on a tool call, so a
     #: slow HRMS is reported as slow rather than as a call that vanished.
     hrms_timeout_seconds: float = 20.0
+
+    #: Optional: a Jira this server reads, with one read-only service account,
+    #: to warn about work a leave would leave undone. Unset, the leave check
+    #: says what the HRMS says and nothing more. The token is a secret.
+    jira_url: str = ""
+    jira_email: str = ""
+    jira_api_token: str = ""
+    #: Which Jira project each HRMS project is, as ``HRMS name=KEY`` pairs
+    #: separated by ``;`` — e.g. ``EC Platform=ECP;Payroll=PAY``. A project not
+    #: named is not looked at.
+    jira_projects: str = ""
+    #: A sprint is tight when it ends within this many working days after the
+    #: leave, with more than this share of its tickets still open.
+    sprint_tight_days: int = 3
+    sprint_tight_open_share: float = 0.3
+    #: For all of Jira's answers together, well inside the HRMS's own limit.
+    jira_timeout_seconds: float = 8.0

@@ -22,7 +22,9 @@ from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
+from hrms_mcp import workload
 from hrms_mcp.hrms import Hrms, HrmsError
+from hrms_mcp.jira import Jira, project_keys
 
 log = logging.getLogger("hrms_mcp")
 
@@ -55,6 +57,11 @@ Taking a leave request:
    to confirm: do not ask them about any of it yourself, and do not call
    preview_leave or apply_leave for it. The only thing to ask yourself is the
    date, if they gave none. Never ask about projects or managers.
+
+When a check starts with "Heads-up" — teammates already off those days, open
+Jira tickets of theirs, a sprint that is tight — tell the person that first, in
+your own words and with the ticket keys, and leave the choice to them: it is a
+warning, not a refusal, and the request can still be confirmed.
 
 Deciding requests (project managers and HR): call list_leave_requests_to_decide
 to find the request, then approve_leave or reject_leave. A rejection needs a
@@ -106,6 +113,87 @@ def portion_of(value: str) -> str:
     return " ".join(str(value or "").replace("_", " ").split()).lower()
 
 
+def _names(names: list[str]) -> str:
+    """``[A]`` → "A"; ``[A, B]`` → "A and B"; three or more → "3 teammates (A, B and C)"."""
+    listed = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+    return listed if len(names) < 3 else f"{len(names)} teammates ({listed})"
+
+
+def teammates_off(result: dict[str, Any]) -> list[str]:
+    """Who on the asker's projects is already off then: the HRMS's own count
+    (``facts.team_leaves``) — anyone on the same project whose leave overlaps and
+    is not rejected or cancelled, so a pending one counts."""
+    team = (result.get("facts") or {}).get("team_leaves") or {}
+    return [str(n).strip() for n in team.get("on_leave_names") or [] if str(n).strip()]
+
+
+def teammates_sentence(names: list[str], date_from: str, date_to: str) -> str:
+    if not names:
+        return ""
+    have = "has" if len(names) == 1 else "have"
+    return (
+        f"{_names(names)} {have} already applied for leave on "
+        f"{when_of(date_from, date_to)}, so it may be difficult to approve."
+    )
+
+
+def warning_of(sentences: list[str]) -> str:
+    """Every reason to think twice, as one paragraph that asks once. It warns and
+    never blocks — whether to go ahead is the person's call, made on the Confirm
+    that follows."""
+    said = [s for s in sentences if s]
+    return f"Heads-up: {' '.join(said)} Do you still want to apply?" if said else ""
+
+
+def _briefing_lines(briefing: Any, *, jira_checked: bool = False) -> list[str]:
+    """The HRMS's own briefing — a list of lines, or text — without its team line,
+    which the warning above already says, nor its Jira lines when this server
+    read Jira itself and said what they say."""
+    lines = briefing if isinstance(briefing, list) else str(briefing or "").splitlines()
+    return [
+        line
+        for line in (str(item).strip() for item in lines)
+        if line
+        and not line.startswith("Team:")
+        and not (jira_checked and line.startswith("Jira:"))
+    ]
+
+
+async def jira_sentences(
+    hrms: Hrms, jira: Jira | None, ctx: Context, off: list[str], date_from: str, date_to: str
+) -> list[str] | None:
+    """What Jira says about this leave, or None when Jira was not read.
+
+    The person's own open tickets, and — when a teammate is already off — any of
+    their projects' sprints that is tight (``workload``). Never fails the check:
+    a Jira or an HRMS that does not answer here leaves the warning out.
+    """
+    if jira is None or not jira.configured:
+        return None
+    try:
+        start, end = date.fromisoformat(date_from), date.fromisoformat(date_to)
+        session = await _ask(hrms, ctx, "get_user_session", {}) or {}
+        projects = await _ask(hrms, ctx, "get_my_projects", {}) or []
+    except (ToolError, ValueError):
+        return None
+    names = [str(p.get("name") or "") for p in projects if isinstance(p, dict)]
+    work = await jira.work(project_keys(jira.settings, names))
+    if not work:
+        return None
+    settings = jira.settings
+    return [
+        *workload.tight_sprints(
+            work, off, start, end,
+            tight_days=settings.sprint_tight_days,
+            tight_share=settings.sprint_tight_open_share,
+        ),
+        workload.own_work(
+            work, str(session.get("name") or ""), str(session.get("company_email") or ""),
+            start, end,
+        ),
+    ]
+
+
 def when_of(date_from: str, date_to: str) -> str:
     start, end = day_of(date_from), day_of(date_to)
     return start if not date_to or start == end else f"{start} to {end}"
@@ -124,7 +212,7 @@ def _day(value: str) -> str:
     return f"{parsed:%a} {parsed.day} {parsed:%b %Y}"
 
 
-def register(server: MCPServer, hrms: Hrms) -> None:
+def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
     @server.tool(annotations=READ_ONLY, structured_output=False)
     async def get_holidays(year: int, ctx: Context, month: int = 0) -> str:
         """The company's holidays for a year, or for one month of it.
@@ -269,10 +357,12 @@ def register(server: MCPServer, hrms: Hrms) -> None:
             f"{kind_of(leave_type)}, {when_of(date_from, date_to or date_from)}, "
             f"{portion_of(day_portion)}{counts}"
         )
-        briefing = result.get("briefing")
-        parts = [head]
-        if isinstance(briefing, str) and briefing.strip():
-            parts.append(briefing.strip())
+        until = date_to or date_from
+        off = teammates_off(result)
+        from_jira = await jira_sentences(hrms, jira, ctx, off, date_from, until)
+        warning = warning_of([teammates_sentence(off, date_from, until), *(from_jira or [])])
+        parts = [warning, head] if warning else [head]
+        parts.extend(_briefing_lines(result.get("briefing"), jira_checked=from_jira is not None))
         parts.append(await _approvers(hrms, ctx))
         parts.append("Nothing has been filed.")
         return "\n".join(parts)
