@@ -164,6 +164,12 @@ def register(server: MCPServer, hrms: Hrms) -> None:
             arguments["project_manager_id"] = chosen["id"]
         elif len(managers) == 1:
             chosen = managers[0]
+        elif len(managers) > 1:
+            names = ", ".join(m.get("name", "") for m in managers)
+            raise ToolError(
+                f"They have {len(managers)} project managers ({names}). Ask which one "
+                "should approve, and pass that name as approver."
+            )
 
         filed = await _ask(hrms, ctx, "apply_leave", arguments)
         status = filed.get("status", "Pending") if isinstance(filed, dict) else "Pending"
