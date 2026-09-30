@@ -23,17 +23,21 @@ from hrms_mcp import forms, tools, writes
 from hrms_mcp.auth import BearerAuth
 from hrms_mcp.config import Settings
 from hrms_mcp.hrms import Hrms
+from hrms_mcp.jira import Jira
 
 
 def create_app(
-    settings: Settings | None = None, hrms_transport: httpx.AsyncBaseTransport | None = None
+    settings: Settings | None = None,
+    hrms_transport: httpx.AsyncBaseTransport | None = None,
+    jira_transport: httpx.AsyncBaseTransport | None = None,
 ) -> BearerAuth:
     settings = settings or Settings()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     hrms = Hrms(settings, transport=hrms_transport)
+    jira = Jira(settings, transport=jira_transport)
 
-    server = MCPServer("HRMS", instructions=tools.INSTRUCTIONS, version="0.3.0")
-    tools.register(server, hrms)
+    server = MCPServer("HRMS", instructions=tools.INSTRUCTIONS, version="0.4.0")
+    tools.register(server, hrms, jira)
     writes.register(server, hrms)
     forms.register(server, hrms)
 

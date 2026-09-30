@@ -22,7 +22,7 @@ plugins:
   - plugin_id: hrms
     name: HRMS
     summary: Takes and decides leave requests in the company's HRMS, as the person asking.
-    version: 0.3.0
+    version: 0.4.0
     manifest: plugins/hrms/manifest.yaml
     requires:
       connectors: []
@@ -37,7 +37,7 @@ mcp_servers:
     name: HRMS MCP server
     summary: Leave tools in front of the HRMS — read, file and decide — acting as the person asking.
     source: plugins/hrms/mcp-server
-    image: ghcr.io/nh66labs/ec-hrms-mcp:0.3.0
+    image: ghcr.io/nh66labs/ec-hrms-mcp:0.4.0
 
 connectors:
   - connector_id: apollo

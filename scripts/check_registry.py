@@ -9,6 +9,7 @@ and the cheapest to catch here.
 from __future__ import annotations
 
 import sys
+import tomllib
 from pathlib import Path
 
 import yaml
@@ -81,6 +82,23 @@ def check_servers(
         )
 
 
+def check_image(sid: str, source: str, image: object, problems: list[str]) -> None:
+    """The image an operator is told to run is the one built from this source:
+    tagged with the version its pyproject declares. The publishing workflow
+    reads the tag from here, so the two cannot drift."""
+    where = f"index.yaml mcp_servers[{sid!r}]"
+    pyproject = ROOT / source / "pyproject.toml"
+    if not pyproject.is_file():
+        return
+    version = tomllib.loads(pyproject.read_text())["project"]["version"]
+    if not isinstance(image, str) or ":" not in image.rsplit("/", 1)[-1]:
+        problems.append(f"{where}: image must be named with a version tag")
+        return
+    tag = image.rsplit(":", 1)[1]
+    if tag != version:
+        problems.append(f"{where}: image tag {tag} is not the server's version {version}")
+
+
 def main() -> None:
     problems: list[str] = []
     index_path = ROOT / "index.yaml"
@@ -104,6 +122,8 @@ def main() -> None:
         source = server.get("source")
         if source and not (ROOT / source).is_dir():
             problems.append(f"index.yaml mcp_servers[{sid!r}]: source {source} does not exist")
+        elif source:
+            check_image(sid, source, server.get("image"), problems)
         server_ids.add(sid)
     for entry in index.get("plugins") or []:
         plugin_id = entry.get("plugin_id")
