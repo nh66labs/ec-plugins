@@ -50,9 +50,11 @@ RECENT_NOTES = 8
 INSTRUCTIONS = """\
 Setting MBOs (a person's quarterly objectives):
 1. Call get_my_mbo_context first. It gives their role, mentor, projects, what
-   they have been working on, last quarter's MBOs, and whether this quarter's
-   plan can be changed. If it cannot, say why in its words; you may still help
-   them think, but nothing can be saved until HR opens it.
+   they have been working on, last quarter's MBOs, and this and next quarter's
+   plans with their dates and whether each can be changed. Work on the quarter
+   the person names; if they name none, the one that is open (this quarter's,
+   else next quarter's). If none is open, say why in its words; you may still
+   help them think, but nothing can be saved until HR opens it.
 2. Look at the project's situation in this Space before suggesting anything:
    search its memory, and use its Jira and GitHub tools where there are any,
    for milestones, deadlines, open issues and risks. Base suggestions on what
@@ -60,7 +62,9 @@ Setting MBOs (a person's quarterly objectives):
 3. If you do not know what they want to grow in, ask that once, briefly.
 4. Suggest two or three MBOs at a time. Each has an objective, a KPI that can
    be measured (a number or a date), a suggested weightage, and one line on why
-   it matters now — the project evidence, and how it serves their growth.
+   it matters now — the project evidence, and how it serves their growth. Every
+   date in a KPI falls within the plan's period; if that period has already
+   ended or is nearly over, say so before suggesting.
 5. When they turn one down, ask in a few words what did not fit (too big, the
    wrong focus, not in their control), then offer a genuinely different
    direction, not a rewording of the same idea.
@@ -76,6 +80,44 @@ Only ever discuss the person's own MBOs.
 
 
 # ---- the period ---------------------------------------------------------------
+
+
+#: The quarters' windows as the HRMS names them (the 15th is the cutoff):
+#: month and day of the start and end, and whether the end is the next year.
+QUARTER_WINDOWS = {
+    1: ((4, 1), (6, 15), False),
+    2: ((6, 16), (9, 15), False),
+    3: ((9, 16), (12, 15), False),
+    4: ((12, 16), (3, 15), True),
+}
+
+
+def period_of(plan: dict[str, Any]) -> str:
+    """The plan's period as a person reads it: its own dates, else the HRMS's
+    window for that quarter — "16 Jun 2026 to 15 Sep 2026"."""
+    start, end = str(plan.get("period_start") or ""), str(plan.get("period_end") or "")
+    if start and end:
+        try:
+            first, last = date.fromisoformat(start[:10]), date.fromisoformat(end[:10])
+            return f"{first:%d %b %Y} to {last:%d %b %Y}"
+        except ValueError:
+            pass
+    try:
+        year = int(str(plan.get("fiscal_year", "")).split("-")[0])
+        (sm, sd), (em, ed), next_year = QUARTER_WINDOWS[int(plan.get("quarter", 0))]
+    except (ValueError, KeyError):
+        return ""
+    start_year = year + (1 if sm < 4 else 0)
+    end_year = year + (1 if next_year or em < 4 else 0)
+    return f"{date(start_year, sm, sd):%d %b %Y} to {date(end_year, em, ed):%d %b %Y}"
+
+
+def next_quarter(fiscal_year: str, quarter: int) -> tuple[str, int]:
+    """``("2026-27", 4)`` → ``("2027-28", 1)``; otherwise the quarter after."""
+    if quarter < 4:
+        return fiscal_year, quarter + 1
+    start = int(fiscal_year.split("-")[0]) + 1
+    return f"{start}-{(start + 1) % 100:02d}", 1
 
 
 def previous_quarter(fiscal_year: str, quarter: int) -> tuple[str, int]:
@@ -104,6 +146,9 @@ def plan_lines(plan: Any, heading: str) -> list[str]:
     if not isinstance(plan, dict):
         return [f"{heading}: not available."]
     period = f"Q{plan.get('quarter')} {plan.get('fiscal_year')}"
+    dates = period_of(plan)
+    if dates:
+        period += f", {dates}"
     lines = [f"{heading} ({period}): {plan.get('status', 'unknown')}."]
     if plan.get("can_edit"):
         lines.append("It is open: MBOs can be saved to it.")
@@ -223,8 +268,9 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         """Everything the HRMS knows that helps the person set their MBOs.
 
         Their role and mentor, their projects and who manages them, what they
-        have logged in the last three months, last quarter's MBOs, and this
-        quarter's plan with whether it can still be changed. Call it first.
+        have logged in the last three months, last quarter's MBOs, and this and
+        next quarter's plans with their dates and whether each can still be
+        changed. Call it first.
         """
         _identity(ctx)  # nothing is asked of the HRMS for no one
         session = await _ask(hrms, ctx, "get_user_session", {})
@@ -239,6 +285,13 @@ def register(server: MCPServer, hrms: Hrms) -> None:
                 hrms, ctx, "get_my_mbo_plan", {"fiscal_year": fiscal_year, "quarter": quarter}
             )
             lines += [""] + plan_lines(previous, "Last quarter's plan")
+            fiscal_year, quarter = next_quarter(
+                str(current["fiscal_year"]), int(current["quarter"])
+            )
+            upcoming = await _ask(
+                hrms, ctx, "get_my_mbo_plan", {"fiscal_year": fiscal_year, "quarter": quarter}
+            )
+            lines += [""] + plan_lines(upcoming, "Next quarter's plan")
         lines += [""] + project_lines(await _ask(hrms, ctx, "get_my_projects", {}))
         since = _today(session) - timedelta(days=RECENT_WORK_DAYS)
         entries = await _ask(

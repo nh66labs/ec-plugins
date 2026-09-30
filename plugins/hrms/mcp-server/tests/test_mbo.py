@@ -63,12 +63,22 @@ def mbo_hrms(hrms: FakeHrms) -> FakeHrms:  # noqa: F811
     return hrms
 
 
-def _plans(fake: FakeHrms, current: dict, previous: dict) -> None:
-    """get_my_mbo_plan answers the current plan, or the previous one when asked
-    for an earlier quarter."""
-    fake.results["get_my_mbo_plan"] = lambda arguments: (
-        previous if arguments.get("quarter") else current
-    )
+NEXT = {
+    "fiscal_year": "2026-27", "quarter": 4, "status": "Not started", "can_edit": False,
+    "why_not_editable": "MBO setting for Q4 2026-27 has not been opened — HR enables it",
+    "mbos": [],
+}
+
+
+def _plans(fake: FakeHrms, current: dict, previous: dict, upcoming: dict = NEXT) -> None:
+    """get_my_mbo_plan answers the current plan with no period given, else the
+    quarter before or after it."""
+    def answer(arguments: dict) -> dict:
+        if not arguments.get("quarter"):
+            return current
+        return previous if arguments["quarter"] < current["quarter"] else upcoming
+
+    fake.results["get_my_mbo_plan"] = answer
 
 
 # --- what Enterprise Claw sees -----------------------------------------------------
@@ -112,12 +122,14 @@ def test_the_context_gathers_what_the_hrms_knows_as_lines(client, mbo_hrms) -> N
     said = text(call(client, "get_my_mbo_context"))
 
     assert "Designation: Software Engineer" in said and "Mentor: Mira" in said
-    assert "This quarter's plan (Q3 2026-27): Draft." in said and "It is open" in said
-    assert "Last quarter's plan (Q2 2026-27): Evaluated." in said
+    assert "This quarter's plan (Q3 2026-27, 16 Sep 2026 to 15 Dec 2026): Draft." in said
+    assert "It is open" in said
+    assert "Last quarter's plan (Q2 2026-27, 16 Jun 2026 to 15 Sep 2026): Evaluated." in said
     assert "Learn the billing module" in said and "manager rating 80" in said
     assert "Phoenix: Billing platform rewrite (managed by Priya)" in said
     assert "Phoenix: 13 hours" in said and "Training: 2 hours" in said
     assert "invoice API" in said
+    assert "Next quarter's plan (Q4 2026-27, 16 Dec 2026 to 15 Mar 2027): Not started." in said
 
 
 def test_the_context_asks_for_the_quarter_before_and_the_last_three_months(
@@ -125,8 +137,10 @@ def test_the_context_asks_for_the_quarter_before_and_the_last_three_months(
 ) -> None:
     _plans(mbo_hrms, PLAN, PREVIOUS)
     call(client, "get_my_mbo_context")
+    plans = [c["arguments"] for c in mbo_hrms.calls() if c["name"] == "get_my_mbo_plan"]
+    assert plans == [{}, {"fiscal_year": "2026-27", "quarter": 2},
+                     {"fiscal_year": "2026-27", "quarter": 4}]
     calls = {c["name"]: c["arguments"] for c in mbo_hrms.calls()}
-    assert calls["get_my_mbo_plan"] == {"fiscal_year": "2026-27", "quarter": 2}
     # The session's date (29 Sep 2026) less 90 days.
     assert calls["get_timesheet"] == {"start_date": "2026-07-01", "end_date": "2026-09-29"}
 
@@ -246,3 +260,21 @@ def test_recent_work_keeps_distinct_notes_newest_first() -> None:
     notes = lines[-1]
     assert notes.startswith("Recent notes: note 12 | note 11")
     assert notes.count("|") == mbo.RECENT_NOTES - 1
+
+
+def test_a_plan_period_is_its_own_dates_else_the_hrms_window() -> None:
+    assert mbo.period_of({"period_start": "2026-07-01", "period_end": "2026-09-30",
+                          "fiscal_year": "2026-27", "quarter": 2}) == "01 Jul 2026 to 30 Sep 2026"
+    assert mbo.period_of({"fiscal_year": "2026-27", "quarter": 1}) == "01 Apr 2026 to 15 Jun 2026"
+    assert mbo.period_of({"fiscal_year": "2026-27", "quarter": 4}) == "16 Dec 2026 to 15 Mar 2027"
+    assert mbo.period_of({"fiscal_year": "?", "quarter": 9}) == ""
+
+
+def test_the_quarter_after_crosses_the_fiscal_year() -> None:
+    assert mbo.next_quarter("2026-27", 2) == ("2026-27", 3)
+    assert mbo.next_quarter("2026-27", 4) == ("2027-28", 1)
+
+
+def test_the_coaching_keeps_deadlines_inside_the_period() -> None:
+    assert "falls within the plan's period" in mbo.INSTRUCTIONS
+    assert "next quarter's" in mbo.INSTRUCTIONS
