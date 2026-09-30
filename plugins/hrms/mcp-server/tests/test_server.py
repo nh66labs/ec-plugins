@@ -616,3 +616,13 @@ def test_several_managers_are_a_choice(client: TestClient, hrms: FakeHrms) -> No
 def test_no_date_is_for_the_assistant_to_ask(client: TestClient) -> None:
     result = call(client, "start_leave_request", {"date_from": ""})
     assert result["isError"] is True and "start date" in text(result)
+
+
+def test_the_instructions_ask_for_every_answer_to_cite_its_result() -> None:
+    """A list of holidays written without [1] is withheld as uncited — found
+    live, three times in three."""
+    from hrms_mcp.tools import INSTRUCTIONS
+
+    said = " ".join(INSTRUCTIONS.split())
+    assert "cites the result it came from by its number, like [1]" in said
+    assert "a list of holidays or balances too" in said
