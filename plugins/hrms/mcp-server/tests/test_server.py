@@ -478,6 +478,17 @@ def test_the_named_approver_is_sent_by_id(client: TestClient, hrms: FakeHrms) ->
     assert refused["isError"] is True and "exactly one of their project managers" in text(refused)
 
 
+def test_several_managers_and_no_approver_files_nothing(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    hrms.results["get_employee_project_managers"] = {
+        "count": 2, "project_managers": [{"id": "a", "name": "Priya"}, {"id": "b", "name": "Arun"}],
+    }
+    refused = call(client, "apply_leave", APPLY)
+    assert refused["isError"] is True and "Priya, Arun" in text(refused)
+    assert "apply_leave" not in [c["name"] for c in hrms.calls()]
+
+
 def test_an_approver_is_matched_exactly_before_by_part_of_a_name() -> None:
     from hrms_mcp.tools import manager_named
 
