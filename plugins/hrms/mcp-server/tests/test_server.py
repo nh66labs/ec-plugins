@@ -534,6 +534,24 @@ def test_a_decision_naming_the_wrong_person_is_refused(client: TestClient, hrms:
     assert "approve_leave" not in [c["name"] for c in hrms.calls()]
 
 
+def test_a_name_that_only_contains_the_employees_is_refused(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    hrms.results["get_leave_routing"] = {"leave_id": "lv-9", "employee": "Ravindra"}
+    refused = call(client, "approve_leave", {"request_id": "lv-9", "employee": "Ravi"})
+    assert refused["isError"] is True and "Ravindra's, not Ravi's" in text(refused)
+    assert "approve_leave" not in [c["name"] for c in hrms.calls()]
+
+
+def test_a_request_the_hrms_names_no_one_for_is_not_decided(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    hrms.results["get_leave_routing"] = {"leave_id": "lv-9"}
+    refused = call(client, "approve_leave", {"request_id": "lv-9", "employee": "Someone"})
+    assert refused["isError"] is True and "did not say whose" in text(refused)
+    assert "approve_leave" not in [c["name"] for c in hrms.calls()]
+
+
 def test_a_rejected_request_says_why_to_its_employee(client: TestClient, hrms: FakeHrms) -> None:
     hrms.results["get_leaves"][0].update(status="Rejected", notes="pending deployment")
     assert text(call(client, "list_my_leaves")) == (

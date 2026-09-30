@@ -52,8 +52,12 @@ async def _checked(
     """
     item = await _to_decide(hrms, ctx, leave_id)
     who = await _whose(hrms, ctx, leave_id)
-    wanted = " ".join(employee.split()).lower()
-    if not wanted or (wanted not in who.lower() and who.lower() not in wanted):
+    if not who:
+        raise ToolError(
+            "The HRMS did not say whose request that is, so it cannot be decided here. "
+            "Decide it in the HRMS instead."
+        )
+    if _name(employee) != _name(who):
         raise ToolError(
             f"That request is {who}'s, not {employee}'s. Look it up again with "
             "list_leave_requests_to_decide."
@@ -61,14 +65,20 @@ async def _checked(
     return item, who
 
 
+def _name(name: str) -> str:
+    """A name as compared: whitespace collapsed, case ignored."""
+    return " ".join(name.split()).casefold()
+
+
 async def _whose(hrms: Hrms, ctx: Context, leave_id: str) -> str:
+    """The name of the employee whose request it is, or "" when the HRMS gives none."""
     try:
         routed = await hrms.call("get_leave_routing", {"leave_id": leave_id}, _identity(ctx))
     except HrmsError as error:
         raise ToolError(str(error)) from None
     if not isinstance(routed, dict):
-        return "someone"
-    return str(routed.get("employee") or "someone")
+        return ""
+    return " ".join(str(routed.get("employee") or "").split())
 
 
 def _decided(item: dict[str, Any], who: str) -> str:
