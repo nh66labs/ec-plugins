@@ -1,0 +1,248 @@
+"""The MBO tools, against the same fake HRMS as the leave tools.
+
+What matters most: the context is gathered from the HRMS as the person asking
+and read as lines; a save reaches the HRMS only as a complete set whose
+weightages total 100, in the one field the HRMS takes; and every schema is one
+Enterprise Claw binds and shows as readable lines on a confirm card.
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import date
+
+import pytest
+
+from hrms_mcp import mbo
+from tests.test_server import (  # noqa: F401, F811 - pytest fixtures
+    FakeHrms,
+    call,
+    client,
+    hrms,
+    rpc,
+    text,
+)
+
+PLAN = {
+    "fiscal_year": "2026-27", "quarter": 3, "status": "Draft", "mbo_access_enabled": True,
+    "can_edit": True, "mentor": "Mira", "total_weightage": 100,
+    "mbos": [
+        {"title": "Ship v2", "kpi": "Released by 15 Nov", "weightage": 60,
+         "completion_percent": 0, "manager_rating": 0},
+        {"title": "Cut P1 bugs", "kpi": "Below 5 open", "weightage": 40,
+         "completion_percent": 0, "manager_rating": 0},
+    ],
+}
+PREVIOUS = {
+    "fiscal_year": "2026-27", "quarter": 2, "status": "Evaluated", "can_edit": False,
+    "why_not_editable": "the Q2 2026-27 plan is Evaluated; only a Draft plan can be changed",
+    "mbos": [{"title": "Learn the billing module", "kpi": "Own 3 tickets", "weightage": 100,
+              "completion_percent": 90, "manager_rating": 80}],
+}
+
+
+@pytest.fixture()
+def mbo_hrms(hrms: FakeHrms) -> FakeHrms:  # noqa: F811
+    hrms.results.update({
+        "get_my_profile": {
+            "name": "Ravi", "employee_code": "EMP-042", "designation": "Software Engineer",
+            "date_of_joining": "2024-01-15", "mentor": "Mira", "skills": ["Go", "React"],
+            "previous_experiences": [{"company": "Acme", "role": "Intern"}],
+        },
+        "get_my_projects": [
+            {"id": "p-1", "name": "Phoenix", "description": "Billing platform rewrite",
+             "project_managers": [{"id": "pm-1", "name": "Priya"}]},
+        ],
+        "get_timesheet": [
+            {"date": "2026-09-20", "project_name": "Phoenix", "hours": 6, "note": "invoice API"},
+            {"date": "2026-09-21", "project_name": "Phoenix", "hours": 7, "note": "invoice API"},
+            {"date": "2026-09-22", "activity_type_name": "Training", "hours": 2, "note": ""},
+        ],
+        "save_my_mbo_plan": PLAN,
+    })
+    return hrms
+
+
+def _plans(fake: FakeHrms, current: dict, previous: dict) -> None:
+    """get_my_mbo_plan answers the current plan, or the previous one when asked
+    for an earlier quarter."""
+    fake.results["get_my_mbo_plan"] = lambda arguments: (
+        previous if arguments.get("quarter") else current
+    )
+
+
+# --- what Enterprise Claw sees -----------------------------------------------------
+
+
+def test_the_mbo_tools_are_listed_with_their_kind(client) -> None:  # noqa: F811
+    tools = {t["name"]: t for t in rpc(client, "tools/list").json()["result"]["tools"]}
+    assert tools["get_my_mbo_context"]["annotations"]["readOnlyHint"] is True
+    assert tools["get_my_mbo_plan"]["annotations"]["readOnlyHint"] is True
+    save = tools["save_my_mbo_plan"]
+    assert save["annotations"]["readOnlyHint"] is False
+    assert save["annotations"]["idempotentHint"] is True
+    # One field per value, so a confirm card reads "Objective 1: …", not a record.
+    properties = save["inputSchema"]["properties"]
+    wanted = {"objective_1", "kpi_1", "weight_1", "objective_5", "kpi_5", "weight_5"}
+    assert wanted <= set(properties)
+    assert all(node["type"] in {"string", "number", "integer"} for node in properties.values())
+    assert set(save["inputSchema"]["required"]) == {
+        "fiscal_year", "quarter", "objective_1", "kpi_1", "weight_1",
+    }
+
+
+def test_the_handshake_carries_the_mbo_coaching(client) -> None:  # noqa: F811
+    result = rpc(
+        client, "initialize",
+        {"protocolVersion": "2025-06-18", "capabilities": {},
+         "clientInfo": {"name": "enterprise-claw", "version": "2"}},
+    ).json()["result"]
+    said = result["instructions"]
+    assert "get_my_mbo_context first" in said
+    assert "genuinely different" in said
+    assert "total exactly 100" in said
+    assert "Never save before they have agreed" in said
+
+
+# --- the context ------------------------------------------------------------------
+
+
+def test_the_context_gathers_what_the_hrms_knows_as_lines(client, mbo_hrms) -> None:  # noqa: F811
+    _plans(mbo_hrms, PLAN, PREVIOUS)
+    said = text(call(client, "get_my_mbo_context"))
+
+    assert "Designation: Software Engineer" in said and "Mentor: Mira" in said
+    assert "This quarter's plan (Q3 2026-27): Draft." in said and "It is open" in said
+    assert "Last quarter's plan (Q2 2026-27): Evaluated." in said
+    assert "Learn the billing module" in said and "manager rating 80" in said
+    assert "Phoenix: Billing platform rewrite (managed by Priya)" in said
+    assert "Phoenix: 13 hours" in said and "Training: 2 hours" in said
+    assert "invoice API" in said
+
+
+def test_the_context_asks_for_the_quarter_before_and_the_last_three_months(
+    client, mbo_hrms,  # noqa: F811
+) -> None:
+    _plans(mbo_hrms, PLAN, PREVIOUS)
+    call(client, "get_my_mbo_context")
+    calls = {c["name"]: c["arguments"] for c in mbo_hrms.calls()}
+    assert calls["get_my_mbo_plan"] == {"fiscal_year": "2026-27", "quarter": 2}
+    # The session's date (29 Sep 2026) less 90 days.
+    assert calls["get_timesheet"] == {"start_date": "2026-07-01", "end_date": "2026-09-29"}
+
+
+def test_every_call_is_made_as_the_person_and_names_no_one(client, mbo_hrms) -> None:  # noqa: F811
+    _plans(mbo_hrms, PLAN, PREVIOUS)
+    call(client, "get_my_mbo_context")
+    for sent in mbo_hrms.calls():
+        assert sent["_identity"]["user_id"] == "emp-0042"
+        assert not {"employee_id", "caller_id", "approver_id"} & set(sent["arguments"])
+
+
+def test_a_quarter_not_yet_opened_says_why(client, mbo_hrms) -> None:  # noqa: F811
+    closed = {"fiscal_year": "2026-27", "quarter": 3, "status": "Not started", "can_edit": False,
+              "why_not_editable": "MBO setting for Q3 2026-27 has not been opened — HR enables it",
+              "mbos": []}
+    _plans(mbo_hrms, closed, PREVIOUS)
+    said = text(call(client, "get_my_mbo_context"))
+    assert "Not started" in said and "HR enables it" in said and "No MBOs on it yet" in said
+
+
+def test_no_identity_asks_the_hrms_nothing(client, mbo_hrms) -> None:  # noqa: F811
+    result = call(client, "get_my_mbo_context", identity=None)
+    assert result["isError"]
+    assert mbo_hrms.calls() == []
+
+
+# --- one plan ---------------------------------------------------------------------
+
+
+def test_a_past_quarter_is_read_by_its_period(client, mbo_hrms) -> None:  # noqa: F811
+    mbo_hrms.results["get_my_mbo_plan"] = PREVIOUS
+    said = text(call(client, "get_my_mbo_plan", {"fiscal_year": "2026-27", "quarter": 2}))
+    assert "Evaluated" in said and "self rating 90%" in said
+    assert mbo_hrms.calls()[-1]["arguments"] == {"fiscal_year": "2026-27", "quarter": 2}
+
+
+def test_the_current_quarter_sends_no_period(client, mbo_hrms) -> None:  # noqa: F811
+    mbo_hrms.results["get_my_mbo_plan"] = PLAN
+    call(client, "get_my_mbo_plan")
+    assert mbo_hrms.calls()[-1]["arguments"] == {}
+
+
+# --- the save ---------------------------------------------------------------------
+
+AGREED = {
+    "fiscal_year": "2026-27", "quarter": 3,
+    "objective_1": "Ship v2", "kpi_1": "Released by 15 Nov", "weight_1": 60,
+    "objective_2": "Cut P1 bugs", "kpi_2": "Below 5 open", "weight_2": 40,
+}
+
+
+def test_a_save_sends_the_agreed_set_as_the_hrms_takes_it(client, mbo_hrms) -> None:  # noqa: F811
+    said = text(call(client, "save_my_mbo_plan", AGREED))
+    assert "Saved 2 MBOs as a Draft." in said and "Submit it in the HRMS" in said
+    sent = mbo_hrms.calls()[-1]
+    assert sent["name"] == "save_my_mbo_plan"
+    assert sent["arguments"]["fiscal_year"] == "2026-27" and sent["arguments"]["quarter"] == 3
+    assert json.loads(sent["arguments"]["mbos"]) == [
+        {"title": "Ship v2", "kpi": "Released by 15 Nov", "weightage": 60},
+        {"title": "Cut P1 bugs", "kpi": "Below 5 open", "weightage": 40},
+    ]
+
+
+@pytest.mark.parametrize(
+    ("change", "says"),
+    [
+        ({"weight_2": 30}, "total 90"),
+        ({"kpi_2": ""}, "objective and a KPI"),
+        ({"weight_1": 0, "weight_2": 100}, "above 0"),
+        ({"objective_3": "Mentor a junior", "kpi_3": "Weekly pairing", "weight_3": 0}, "above 0"),
+        ({"objective_2": "", "kpi_2": "", "weight_2": 0, "objective_3": "x", "kpi_3": "y",
+          "weight_3": 40}, "without gaps"),
+        ({"quarter": 5}, "quarter must be 1-4"),
+    ],
+)
+def test_an_incomplete_set_is_refused_before_the_hrms(
+    client, mbo_hrms, change: dict, says: str,  # noqa: F811
+) -> None:
+    result = call(client, "save_my_mbo_plan", {**AGREED, **change})
+    assert result["isError"]
+    assert says in text(result)
+    assert all(c["name"] != "save_my_mbo_plan" for c in mbo_hrms.calls())
+
+
+def test_the_hrms_refusing_a_save_is_said_plainly(client, mbo_hrms) -> None:  # noqa: F811
+    mbo_hrms.errors["save_my_mbo_plan"] = (
+        "cannot save: the Q3 2026-27 plan is Submitted; only a Draft plan can be changed"
+    )
+    result = call(client, "save_my_mbo_plan", AGREED)
+    assert result["isError"] and "only a Draft plan can be changed" in text(result)
+
+
+def test_the_mbos_never_reach_the_log(client, mbo_hrms, caplog) -> None:  # noqa: F811
+    caplog.set_level("DEBUG")
+    call(client, "save_my_mbo_plan", AGREED)
+    assert "Released by 15 Nov" not in caplog.text
+    assert "emp-0042" not in caplog.text
+
+
+# --- pure helpers -------------------------------------------------------------------
+
+
+def test_the_quarter_before_crosses_the_fiscal_year() -> None:
+    assert mbo.previous_quarter("2026-27", 3) == ("2026-27", 2)
+    assert mbo.previous_quarter("2026-27", 1) == ("2025-26", 4)
+    assert mbo.previous_quarter("2099-00", 1) == ("2098-99", 4)
+
+
+def test_recent_work_keeps_distinct_notes_newest_first() -> None:
+    entries = [
+        {"date": f"2026-09-{d:02d}", "project_name": "Phoenix", "hours": 1, "note": f"note {d}"}
+        for d in range(1, 13)
+    ]
+    lines = mbo.work_lines(entries, date(2026, 7, 1))
+    assert lines[1] == "- Phoenix: 12 hours"
+    notes = lines[-1]
+    assert notes.startswith("Recent notes: note 12 | note 11")
+    assert notes.count("|") == mbo.RECENT_NOTES - 1

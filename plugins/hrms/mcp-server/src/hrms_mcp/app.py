@@ -19,7 +19,7 @@ from mcp.server.mcpserver import MCPServer
 from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, Response
 
-from hrms_mcp import forms, tools, writes
+from hrms_mcp import forms, mbo, tools, writes
 from hrms_mcp.auth import BearerAuth
 from hrms_mcp.config import Settings
 from hrms_mcp.hrms import Hrms
@@ -36,10 +36,13 @@ def create_app(
     hrms = Hrms(settings, transport=hrms_transport)
     jira = Jira(settings, transport=jira_transport)
 
-    server = MCPServer("HRMS", instructions=tools.INSTRUCTIONS, version="0.4.0")
+    server = MCPServer(
+        "HRMS", instructions=tools.INSTRUCTIONS + "\n" + mbo.INSTRUCTIONS, version="0.5.0"
+    )
     tools.register(server, hrms, jira)
     writes.register(server, hrms)
     forms.register(server, hrms)
+    mbo.register(server, hrms)
 
     @server.custom_route("/health", methods=["GET"])
     async def health(_: Request) -> Response:
