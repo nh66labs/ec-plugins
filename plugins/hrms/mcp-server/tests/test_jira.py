@@ -279,6 +279,8 @@ class FakeJira:
         ]
         self.refuse = False
         self.paged = False
+        #: Pages that give a next page without saying whether they are the last.
+        self.unsaid_last = False
         self.paths: list[str] = []
         #: Who Jira's user search finds, by the query it was given.
         self.users: dict[str, list[dict[str, Any]]] = {}
@@ -294,7 +296,8 @@ class FakeJira:
                 first = token is None
                 return httpx.Response(200, json={
                     "issues": self.open[:1] if first else self.open[1:],
-                    "isLast": not first, **({"nextPageToken": "p2"} if first else {}),
+                    **({} if self.unsaid_last and first else {"isLast": not first}),
+                    **({"nextPageToken": "p2"} if first else {}),
                 })
             return httpx.Response(200, json={"issues": self.open})
         if path == "/rest/agile/1.0/board":
@@ -351,6 +354,15 @@ def test_open_work_cut_off_at_the_limit_is_incomplete(monkeypatch: pytest.Monkey
     assert work.complete is False
     monkeypatch.setattr(jira_module, "_LIMIT", 1000)
     (work,) = asyncio.run(Jira(_settings(), httpx.MockTransport(fake.handler)).work(["ECP"]))
+    assert work.complete is True
+
+
+def test_a_page_that_does_not_say_it_is_the_last_is_read_past() -> None:
+    fake = FakeJira()
+    fake.paged = True
+    fake.unsaid_last = True
+    (work,) = asyncio.run(Jira(_settings(), httpx.MockTransport(fake.handler)).work(["ECP"]))
+    assert [t.key for t in work.open_tickets] == ["ECP-1", "ECP-2"]
     assert work.complete is True
 
 
@@ -535,6 +547,20 @@ def test_someone_who_manages_nobody_cannot_ask_about_others_leave(
     client, hrms = managing
     hrms.errors["get_team_leaves"] = "access denied: only project managers and admins can view"
     assert "only project managers and HR" in text(_impact(client))
+
+
+def test_the_hrms_jira_lines_about_projects_not_checked_stay_for_the_manager(
+    managing: tuple[TestClient, FakeHrms],
+) -> None:
+    client, hrms = managing
+    hrms.results["get_leave_routing"]["briefing"] += [
+        "Jira: Ticket PAY-7 is due on 2026-10-02.",
+        "Jira: 2 open tickets due this week.",
+    ]
+    said = text(_impact(client))
+    assert "Jira: Ticket ECP-1" not in said, "ECP was checked and said above"
+    assert "Jira: Ticket PAY-7 is due on 2026-10-02." in said, "PAY was not checked"
+    assert "Jira: 2 open tickets due this week." in said, "its projects are unknown"
 
 
 def test_without_jira_the_manager_is_told_it_was_not_checked_and_keeps_the_hrms_lines(
