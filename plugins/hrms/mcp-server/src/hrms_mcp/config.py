@@ -39,5 +39,11 @@ class Settings(BaseSettings):
     #: leave, with more than this share of its tickets still open.
     sprint_tight_days: int = 3
     sprint_tight_open_share: float = 0.3
+    #: An open ticket is named in the leave warning when its deadline is within
+    #: this many working days after the leave; and, when the leave starts within
+    #: ``jira_leave_soon_days`` working days, when it is due before the leave or
+    #: in progress with no deadline. Any other open ticket is only counted.
+    jira_after_leave_days: int = 3
+    jira_leave_soon_days: int = 5
     #: For all of Jira's answers together, well inside the HRMS's own limit.
     jira_timeout_seconds: float = 8.0

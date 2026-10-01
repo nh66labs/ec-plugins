@@ -369,7 +369,7 @@ def test_the_context_gives_dates_balance_and_approver_without_asking(
     assert "Thursday 2026-10-01" in said and "Tuesday 2026-10-06" in said
     assert "Gandhi Jayanti" in said
     assert "Casual Leave 10 of 12 days left" in said
-    assert "approved by Priya" in said
+    assert "Approver: Priya" in said
 
 
 def test_several_managers_are_named_so_the_assistant_asks_only_then(

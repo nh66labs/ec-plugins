@@ -49,32 +49,92 @@ def _sprint(open_count: int, done: int, ends: date = MON, who: str = "Anu") -> S
 # -- the rules -------------------------------------------------------------------------
 
 
-def test_the_persons_own_open_tickets_are_named_in_progress_first() -> None:
-    work = [ProjectWork("ECP", open_tickets=[
-        _t("ECP-3", "Ravi"),
-        _t("ECP-1", "ravi", "indeterminate", due=FRI),
-        _t("ECP-2", "Anu"),
-        _t("ECP-4", "Ravi", "done"),
+#: A leave on Thu 12 Nov, asked for six weeks ahead or three working days ahead.
+NOV12, FAR, SOON = date(2026, 11, 12), date(2026, 10, 1), date(2026, 11, 9)
+
+
+def _around_the_leave(who: str = "Ravi") -> list[ProjectWork]:
+    """One open ticket of theirs for each place a ticket can stand against the leave."""
+    return [ProjectWork("ECP", open_tickets=[
+        _t("ECP-1", who, due=date(2026, 11, 12)),  # while they are away
+        _t("ECP-2", who, due=date(2026, 11, 13)),  # the day they are back
+        _t("ECP-3", who, due=date(2026, 11, 18)),  # four working days after: not touched
+        _t("ECP-4", who, "indeterminate", due=date(2026, 11, 10)),  # before they go
+        _t("ECP-5", who, due=date(2026, 11, 2)),  # overdue
+        _t("ECP-6", who, "indeterminate"),  # in progress, no deadline
+        _t("ECP-7", who),  # to do, no deadline
+        _t("ECP-8", "Bala", due=date(2026, 11, 12)),  # someone else's
+        _t("ECP-9", who, "done", due=date(2026, 11, 12)),  # done
     ])]
-    said = own_work(work, "Ravi", "", FRI, FRI)
-    assert said == (
-        "You have 2 open Jira tickets: ECP-1 Task ECP-1 (In Progress, due Fri 2 Oct) and "
-        "ECP-3 Task ECP-3 (To Do) — worth handing over before you go."
+
+
+def test_tickets_due_well_before_a_leave_far_off_are_counted_not_named() -> None:
+    work = [ProjectWork("ECP", open_tickets=[
+        _t("ECP-1", "Ravi", "indeterminate", due=date(2026, 10, 30)),
+        _t("ECP-2", "Ravi", due=date(2026, 10, 28)),
+    ])]
+    assert own_work(work, "Ravi", "", NOV12, NOV12, today=FAR) == (
+        "", "None of your 2 open Jira tickets are due around your leave."
     )
-    assert own_work(work, "Priya", "", FRI, FRI) == ""
+    assert own_work(work[:0], "Ravi", "", NOV12, NOV12, today=FAR) == ("", "")
+
+
+def test_a_leave_far_off_names_only_what_is_due_while_away_or_just_after() -> None:
+    warning, note = own_work(_around_the_leave(), "Ravi", "", NOV12, NOV12, today=FAR)
+    assert warning == (
+        "You have 2 open Jira tickets to hand over before you go: ECP-1 Task ECP-1 (To Do, "
+        "due Thu 12 Nov, while you're away) and ECP-2 Task ECP-2 (To Do, due Fri 13 Nov, the "
+        "day you're back). 5 other open tickets of yours are not due around your leave."
+    )
+    assert note == ""
+
+
+def test_a_leave_soon_also_names_work_due_before_it_and_work_in_progress() -> None:
+    warning, _ = own_work(_around_the_leave(), "Ravi", "", NOV12, NOV12, today=SOON)
+    assert warning == (
+        "You have 5 open Jira tickets to hand over before you go: ECP-1 Task ECP-1 (To Do, "
+        "due Thu 12 Nov, while you're away), ECP-2 Task ECP-2 (To Do, due Fri 13 Nov, the day "
+        "you're back), ECP-5 Task ECP-5 (To Do, overdue since Mon 2 Nov) and 2 more. "
+        "2 other open tickets of yours are not due around your leave."
+    )
+
+
+def test_a_ticket_with_no_due_date_takes_the_end_of_its_sprint() -> None:
+    sprint = Sprint("Sprint 14", date(2026, 11, 13), [_t("ECP-1", "Ravi")])
+    work = [ProjectWork("ECP", open_tickets=[_t("ECP-1", "Ravi")], sprint=sprint)]
+    assert own_work(work, "Ravi", "", NOV12, NOV12, today=FAR)[0] == (
+        "You have 1 open Jira ticket to hand over before you go: ECP-1 Task ECP-1 (To Do, no "
+        "due date; sprint “Sprint 14” ends Fri 13 Nov, the day you're back)."
+    )
+
+
+def test_a_sprint_left_open_past_its_end_is_missed_not_ahead() -> None:
+    sprint = Sprint("Sprint 14", date(2026, 11, 2), [_t("ECP-1", "Ravi")])
+    work = [ProjectWork("ECP", open_tickets=[_t("ECP-1", "Ravi")], sprint=sprint)]
+    assert own_work(work, "Ravi", "", NOV12, NOV12, today=SOON)[0] == (
+        "You have 1 open Jira ticket to hand over before you go: ECP-1 Task ECP-1 (To Do, no "
+        "due date; sprint “Sprint 14” ended Mon 2 Nov)."
+    )
+
+
+def test_the_operator_sets_how_long_after_the_leave_still_counts() -> None:
+    warning, _ = own_work(
+        _around_the_leave(), "Ravi", "", NOV12, NOV12, today=FAR, after_days=4
+    )
+    assert "ECP-3 Task ECP-3 (To Do, due Wed 18 Nov, just after you're back)" in warning
 
 
 def test_more_than_three_are_counted_not_listed() -> None:
-    work = [ProjectWork("ECP", open_tickets=[_t(f"ECP-{i}", "Ravi") for i in range(5)])]
-    said = own_work(work, "Ravi", "", FRI, FRI)
-    assert said.count("(To Do)") == 3
-    assert "and 2 more" in said
+    work = [ProjectWork("ECP", open_tickets=[_t(f"ECP-{i}", "Ravi", due=FRI) for i in range(5)])]
+    warning, _ = own_work(work, "Ravi", "", FRI, FRI)
+    assert warning.count("while you're away)") == 3
+    assert "and 2 more." in warning
 
 
 def test_the_person_is_found_by_email_before_name() -> None:
-    mine = _t("ECP-1", "R. K.", assignee_email="ravi@acme.test")
+    mine = _t("ECP-1", "R. K.", assignee_email="ravi@acme.test", due=FRI)
     work = [ProjectWork("ECP", open_tickets=[mine])]
-    assert own_work(work, "Ravi", "RAVI@acme.test", FRI, FRI).startswith("You have 1 open")
+    assert own_work(work, "Ravi", "RAVI@acme.test", FRI, FRI)[0].startswith("You have 1 open")
 
 
 def test_a_tight_sprint_with_a_teammate_off_names_their_open_tickets() -> None:
@@ -112,12 +172,27 @@ def test_a_sprint_that_is_not_tight_or_no_one_off_is_not_warned_of(
     assert tight_sprints(work, off, FRI, FRI, tight_days=3, tight_share=0.3) == [], why
 
 
-def test_a_manager_is_shown_the_applicants_open_tickets_or_told_there_are_none() -> None:
+def test_a_manager_is_shown_what_the_leave_touches_first_then_the_rest() -> None:
+    assert their_work(_around_the_leave("Anu"), "Anu", NOV12, NOV12, today=FAR) == (
+        "Anu has 7 open Jira tickets in ECP; 2 are affected by this leave: ECP-1 Task ECP-1 "
+        "(To Do, due Thu 12 Nov, while they're away) and ECP-2 Task ECP-2 (To Do, due Fri 13 "
+        "Nov, the day they're back). Also open, not affected by the leave: ECP-5 Task ECP-5 "
+        "(To Do, due Mon 2 Nov), ECP-4 Task ECP-4 (In Progress, due Tue 10 Nov), ECP-3 Task "
+        "ECP-3 (To Do, due Wed 18 Nov), ECP-6 Task ECP-6 (In Progress) and ECP-7 Task ECP-7 "
+        "(To Do)."
+    )
+    said = their_work(_around_the_leave("Anu"), "Anu", NOV12, NOV12, today=SOON)
+    assert "; 5 are affected by this leave:" in said
+    assert "ECP-4 Task ECP-4 (In Progress, due Tue 10 Nov, before they go)" in said
+
+
+def test_a_manager_is_told_when_nothing_is_affected_or_there_is_nothing_open() -> None:
     work = [ProjectWork("ECP", open_tickets=[
-        _t("ECP-7", "Anu", "indeterminate"), _t("ECP-8", "Ravi"), _t("ECP-9", "Anu", "done"),
+        _t("ECP-7", "Anu", "indeterminate", due=date(2026, 10, 30)), _t("ECP-8", "Ravi"),
     ])]
-    assert their_work(work, "Anu", FRI, FRI) == (
-        "Anu has 1 open Jira ticket in ECP: ECP-7 Task ECP-7 (In Progress)."
+    assert their_work(work, "Anu", NOV12, NOV12, today=FAR) == (
+        "Anu's 1 open Jira ticket in ECP is not affected by this leave: ECP-7 Task ECP-7 "
+        "(In Progress, due Fri 30 Oct)."
     )
     assert their_work(work, "Priya", FRI, FRI, account="acc-priya") == (
         "Priya has no open Jira tickets in ECP."
@@ -138,7 +213,7 @@ def test_none_is_not_said_when_not_every_open_ticket_was_read() -> None:
     assert "has no open" not in said
     assert "only some of the open tickets in ECP could be read" in said
     found = [ProjectWork("ECP", open_tickets=[_t("ECP-7", "Anu")], complete=False)]
-    assert their_work(found, "Anu", FRI, FRI).startswith("Anu has 1 open Jira ticket in ECP")
+    assert their_work(found, "Anu", FRI, FRI).startswith("Anu's 1 open Jira ticket in ECP")
     assert "may not be listed" in their_work(found, "Anu", FRI, FRI)
 
 
@@ -147,6 +222,14 @@ def test_a_manager_is_shown_up_to_ten_of_them() -> None:
     said = their_work(work, "Anu", FRI, FRI)
     assert said.count("(To Do)") == 10
     assert said.endswith("and 2 more.")
+    touched = [ProjectWork("ECP", open_tickets=[
+        _t(f"ECP-{i}", "Anu", due=FRI if i < 8 else None) for i in range(12)
+    ])]
+    said = their_work(touched, "Anu", FRI, FRI)
+    assert said.count("while they're away)") == 8
+    assert said.count("(To Do)") == 2, "the rest fill the room left"
+    assert said.endswith("Also open, not affected by the leave: ECP-10 Task ECP-10 (To Do), "
+                         "ECP-11 Task ECP-11 (To Do) and 2 more.")
 
 
 def test_a_person_is_matched_by_jira_account_before_any_name() -> None:
@@ -154,10 +237,11 @@ def test_a_person_is_matched_by_jira_account_before_any_name() -> None:
     namesake = _t("ECP-8", "Navaneeth K", assignee_account="acc-other")
     work = [ProjectWork("ECP", open_tickets=[theirs, namesake])]
     assert their_work(work, "Navaneeth K", FRI, FRI, account="acc-nav") == (
-        "Navaneeth K has 1 open Jira ticket in ECP: ECP-7 Task ECP-7 (In Progress)."
+        "Navaneeth K's 1 open Jira ticket in ECP is not affected by this leave: ECP-7 Task "
+        "ECP-7 (In Progress)."
     )
-    assert own_work(work, "Navaneeth K", "", FRI, FRI, account="acc-nav").startswith(
-        "You have 1 open Jira ticket: ECP-7"
+    assert own_work(work, "Navaneeth K", "", FRI, FRI, account="acc-nav") == (
+        "", "Your 1 open Jira ticket is not due around your leave."
     )
 
 
@@ -283,6 +367,10 @@ def test_an_account_is_found_by_email_only_when_jira_is_sure() -> None:
             {"accountId": "acc-nav", "displayName": "navaneeth", "emailAddress": "nav@acme.test"}
         ],
         "hid@acme.test": [{"accountId": "acc-hid", "displayName": "hid"}],
+        "hids@acme.test": [
+            {"accountId": "acc-hid", "displayName": "hid"},
+            {"accountId": "acc-hid2", "displayName": "hid s"},
+        ],
         "two@acme.test": [{"accountId": "a1"}, {"accountId": "a2"}],
         "jo@acme.test": [{"accountId": "acc-jo-au", "emailAddress": "jo@acme.test.au"}],
         "sam@acme.test": [
@@ -297,6 +385,7 @@ def test_an_account_is_found_by_email_only_when_jira_is_sure() -> None:
     assert asyncio.run(jira.account_of("jo@acme.test")) == "", "another email is someone else"
     assert asyncio.run(jira.account_of("sam@acme.test")) == "acc-sam", "the exact email wins"
     assert asyncio.run(jira.account_of("hid@acme.test")) == "", "a hidden email may be another's"
+    assert asyncio.run(jira.account_of("hids@acme.test")) == "", "two hidden: unsure"
     assert asyncio.run(jira.account_of("nobody@acme.test")) == ""
     fake.refuse = True
     assert asyncio.run(jira.account_of("nav@acme.test")) == "", "a refusal is no account"
@@ -354,8 +443,8 @@ def test_the_check_warns_once_with_the_teammate_the_sprint_and_the_persons_ticke
         "Heads-up: Anu has already applied for leave on Fri 2 Oct 2026, so it may be difficult "
         "to approve. ECP's sprint “Sprint 14” ends on Mon 5 Oct with 6 of 10 tickets still to "
         "do or in progress, including Anu's ECP-1 Task ECP-1 (In Progress). You have 1 open "
-        "Jira ticket: ECP-2 Task ECP-2 (In Progress) — worth handing over before you go. "
-        "Do you still want to apply?"
+        "Jira ticket to hand over before you go: ECP-2 Task ECP-2 (In Progress, no due date; "
+        "sprint “Sprint 14” ends Mon 5 Oct, the day you're back). Do you still want to apply?"
     )
     assert "Jira: Ticket" not in said, "said once, in the warning"
     assert "Balance: 10.0" in said and "Nothing has been filed." in said
@@ -410,7 +499,8 @@ def test_a_manager_asking_about_a_request_is_told_what_the_applicant_leaves_undo
     client, _ = managing
     assert text(_impact(client)).splitlines() == [
         "Anu — Casual leave, Thu 1 Oct 2026, full day, Pending. Reason: family function.",
-        "Anu has 1 open Jira ticket in ECP: ECP-1 Task ECP-1 (In Progress).",
+        "Anu has 1 open Jira ticket in ECP, affected by this leave: ECP-1 Task ECP-1 (In "
+        "Progress, no due date; sprint “Sprint 14” ends Mon 5 Oct, just after they're back).",
         "Only the asker's own Jira projects were checked (ECP); any other projects Anu "
         "works on were not.",
         "ECP's sprint “Sprint 14” ends on Mon 5 Oct with 6 of 10 tickets still to do or in "
@@ -475,7 +565,7 @@ def test_the_applicant_is_found_in_jira_by_their_hrms_email_whatever_jira_calls_
         _issue("ECP-1", "Anu", account="acc-someone-else"),
     ]
     said = text(_impact(client))
-    assert "Anu has 1 open Jira ticket in ECP: ECP-5 Task ECP-5 (In Progress)." in said
+    assert "Anu has 1 open Jira ticket in ECP, affected by this leave: ECP-5 Task " in said
     assert "Only the asker's own Jira projects were checked (ECP)" in said
 
 
@@ -489,4 +579,16 @@ def test_the_employee_is_warned_of_tickets_jira_files_under_another_name(
         ]
     }
     jira.open = [_issue("ECP-3", "ravi.k", account="acc-ravi")]
-    assert "You have 1 open Jira ticket: ECP-3 Task ECP-3 (In Progress)" in _preview(client)
+    assert "You have 1 open Jira ticket to hand over before you go: ECP-3 Task" in _preview(client)
+
+
+def test_open_tickets_the_leave_does_not_touch_are_a_plain_line_not_a_warning(
+    checked: tuple[TestClient, FakeHrms], jira: FakeJira
+) -> None:
+    client, _ = checked
+    jira.open = [_issue("ECP-20", "Ravi", "new")]
+    said = _preview(client)
+    warning, head, note = said.splitlines()[:3]
+    assert "Jira ticket" not in warning
+    assert head.startswith("Casual leave, Fri 2 Oct 2026")
+    assert note == "Your 1 open Jira ticket is not due around your leave."

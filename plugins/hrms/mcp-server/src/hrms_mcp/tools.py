@@ -191,10 +191,12 @@ def _briefing_lines(briefing: Any, *, jira_checked: bool = False) -> list[str]:
 
 async def jira_sentences(
     hrms: Hrms, jira: Jira | None, ctx: Context, off: list[str], date_from: str, date_to: str
-) -> list[str] | None:
-    """What Jira says about this leave, or None when Jira was not read.
+) -> tuple[list[str], str] | None:
+    """What Jira says about this leave, or None when Jira was not read: the
+    sentences that warn, and a note said as a plain line when none of the
+    person's open tickets is due around the leave.
 
-    The person's own open tickets, and — when a teammate is already off — any of
+    The person's own open tickets the leave touches, and — when a teammate is already off — any of
     their projects' sprints that is tight (``workload``). Never fails the check:
     a Jira or an HRMS that does not answer here leaves the warning out.
     """
@@ -209,21 +211,35 @@ async def jira_sentences(
     names = [str(p.get("name") or "") for p in projects if isinstance(p, dict)]
     email = str(session.get("company_email") or "")
     work, account = await asyncio.gather(
-        jira.work(project_keys(jira.settings, names)), jira.account_of(email)
+        jira.work(project_keys(jira.settings, names)),
+        jira.account_of(email),
     )
     if not work:
         return None
     settings = jira.settings
+    warning, note = workload.own_work(
+        work, str(session.get("name") or ""), email, start, end, account=account,
+        today=_today(session),
+        after_days=settings.jira_after_leave_days,
+        soon_days=settings.jira_leave_soon_days,
+    )
     return [
         *workload.tight_sprints(
             work, off, start, end,
             tight_days=settings.sprint_tight_days,
             tight_share=settings.sprint_tight_open_share,
         ),
-        workload.own_work(
-            work, str(session.get("name") or ""), email, start, end, account=account
-        ),
-    ]
+        warning,
+    ], note
+
+
+def _today(session: Any) -> date:
+    """Today in the asker's timezone, as the HRMS says it; the server's own when
+    it does not."""
+    try:
+        return date.fromisoformat(str((session or {}).get("current_date") or "")[:10])
+    except (ValueError, AttributeError):
+        return date.today()
 
 
 def when_of(date_from: str, date_to: str) -> str:
@@ -392,8 +408,11 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
         until = date_to or date_from
         off = teammates_off(result)
         from_jira = await jira_sentences(hrms, jira, ctx, off, date_from, until)
-        warning = warning_of([teammates_sentence(off, date_from, until), *(from_jira or [])])
+        jira_warnings, jira_note = from_jira or ([], "")
+        warning = warning_of([teammates_sentence(off, date_from, until), *jira_warnings])
         parts = [warning, head] if warning else [head]
+        if jira_note:
+            parts.append(jira_note)
         parts.extend(_briefing_lines(result.get("briefing"), jira_checked=from_jira is not None))
         parts.append(await _approvers(hrms, ctx))
         parts.append("Nothing has been filed.")
@@ -529,8 +548,9 @@ async def their_jira(
 ) -> list[str] | None:
     """What Jira says about someone else's leave, or None when Jira was not read.
 
-    Their open tickets and a sprint of theirs that is tight, in the projects of
-    the manager asking — which are the ones the applicant's leave is decided on.
+    Their open tickets — those the leave touches first — and a sprint of theirs
+    that is tight, in the projects of the manager asking — which are the ones
+    the applicant's leave is decided on.
     The HRMS does not list the applicant's own projects, so it says that any
     others were not checked."""
     if jira is None or not jira.configured or who == "Someone":
@@ -540,6 +560,10 @@ async def their_jira(
         projects = await _ask(hrms, ctx, "get_my_projects", {}) or []
     except (ToolError, ValueError):
         return None
+    try:
+        session = await _ask(hrms, ctx, "get_user_session", {})
+    except ToolError:
+        session = {}
     names = [str(p.get("name") or "") for p in projects if isinstance(p, dict)]
     email = await _email_of(hrms, ctx, who)
     work, account = await asyncio.gather(
@@ -550,7 +574,12 @@ async def their_jira(
     settings = jira.settings
     checked = ", ".join(p.key for p in work)
     return [
-        workload.their_work(work, who, start, end, email=email, account=account),
+        workload.their_work(
+            work, who, start, end, email=email, account=account,
+            today=_today(session),
+            after_days=settings.jira_after_leave_days,
+            soon_days=settings.jira_leave_soon_days,
+        ),
         f"Only the asker's own Jira projects were checked ({checked}); any other "
         f"projects {who} works on were not.",
         *workload.tight_sprints(
@@ -592,7 +621,7 @@ async def _approvers(hrms: Hrms, ctx: Context) -> str:
     if not managers:
         return "No project manager is recorded for them; the HRMS routes the request itself."
     if len(managers) == 1:
-        return f"Their leave is approved by {managers[0]}."
+        return f"Approver: {managers[0]}."
     return (
         f"They have {len(managers)} project managers: {', '.join(managers)}. Ask which one "
         "should approve, and pass that name as approver when applying."
