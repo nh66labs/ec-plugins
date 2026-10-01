@@ -246,7 +246,10 @@ def test_a_jira_that_refuses_is_skipped_not_failed() -> None:
 def test_an_account_is_found_by_email_only_when_jira_is_sure() -> None:
     fake = FakeJira()
     fake.users = {
-        "nav@acme.test": [{"accountId": "acc-nav", "displayName": "navaneeth"}],
+        "nav@acme.test": [
+            {"accountId": "acc-nav", "displayName": "navaneeth", "emailAddress": "nav@acme.test"}
+        ],
+        "hid@acme.test": [{"accountId": "acc-hid", "displayName": "hid"}],
         "two@acme.test": [{"accountId": "a1"}, {"accountId": "a2"}],
         "jo@acme.test": [{"accountId": "acc-jo-au", "emailAddress": "jo@acme.test.au"}],
         "sam@acme.test": [
@@ -260,6 +263,7 @@ def test_an_account_is_found_by_email_only_when_jira_is_sure() -> None:
     assert asyncio.run(jira.account_of("two@acme.test")) == "", "ambiguous"
     assert asyncio.run(jira.account_of("jo@acme.test")) == "", "another email is someone else"
     assert asyncio.run(jira.account_of("sam@acme.test")) == "acc-sam", "the exact email wins"
+    assert asyncio.run(jira.account_of("hid@acme.test")) == "", "a hidden email may be another's"
     assert asyncio.run(jira.account_of("nobody@acme.test")) == ""
     fake.refuse = True
     assert asyncio.run(jira.account_of("nav@acme.test")) == "", "a refusal is no account"
@@ -374,6 +378,8 @@ def test_a_manager_asking_about_a_request_is_told_what_the_applicant_leaves_undo
     assert text(_impact(client)).splitlines() == [
         "Anu — Casual leave, Thu 1 Oct 2026, full day, Pending. Reason: family function.",
         "Anu has 1 open Jira ticket in ECP: ECP-1 Task ECP-1 (In Progress).",
+        "Only the asker's own Jira projects were checked (ECP); any other projects Anu "
+        "works on were not.",
         "ECP's sprint “Sprint 14” ends on Mon 5 Oct with 6 of 10 tickets still to do or in "
         "progress, including Anu's ECP-1 Task ECP-1 (In Progress).",
         'Calendar: "Payments sync" (10:00) — they attend.',
@@ -426,19 +432,28 @@ def test_the_applicant_is_found_in_jira_by_their_hrms_email_whatever_jira_calls_
         {"id": "emp-7", "name": "Anu", "company_email": "anu@acme.test"},
         {"id": "emp-8", "name": "Anu Mathew", "company_email": "anu.m@acme.test"},
     ]
-    jira.users = {"anu@acme.test": [{"accountId": "acc-anu", "displayName": "anu.k"}]}
+    jira.users = {
+        "anu@acme.test": [
+            {"accountId": "acc-anu", "displayName": "anu.k", "emailAddress": "anu@acme.test"}
+        ]
+    }
     jira.open = [
         _issue("ECP-5", "anu.k", account="acc-anu"),
         _issue("ECP-1", "Anu", account="acc-someone-else"),
     ]
     said = text(_impact(client))
     assert "Anu has 1 open Jira ticket in ECP: ECP-5 Task ECP-5 (In Progress)." in said
+    assert "Only the asker's own Jira projects were checked (ECP)" in said
 
 
 def test_the_employee_is_warned_of_tickets_jira_files_under_another_name(
     checked: tuple[TestClient, FakeHrms], jira: FakeJira
 ) -> None:
     client, _ = checked
-    jira.users = {"ravi@acme.test": [{"accountId": "acc-ravi", "displayName": "ravi.k"}]}
+    jira.users = {
+        "ravi@acme.test": [
+            {"accountId": "acc-ravi", "displayName": "ravi.k", "emailAddress": "ravi@acme.test"}
+        ]
+    }
     jira.open = [_issue("ECP-3", "ravi.k", account="acc-ravi")]
     assert "You have 1 open Jira ticket: ECP-3 Task ECP-3 (In Progress)" in _preview(client)

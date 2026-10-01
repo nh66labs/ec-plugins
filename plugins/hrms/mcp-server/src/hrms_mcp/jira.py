@@ -153,10 +153,10 @@ class Jira:
 
         Jira finds a person by their email even when it hides that email on
         their tickets, which is why this is asked rather than read off a ticket.
-        Only an unambiguous answer counts: the one whose email Jira shows as
-        exactly this, or else the one person whose email Jira hides. Jira's
-        search matches prefixes, so someone showing another email — nav@acme.com.au
-        for nav@acme.com — is someone else."""
+        Only the one person whose email Jira shows as exactly this counts. Jira's
+        search matches prefixes, so a match showing another email — or hiding
+        its email, which may be nav@acme.com.au for nav@acme.com — may be
+        someone else; they are then found by name instead."""
         if not email:
             return ""
         try:
@@ -172,9 +172,7 @@ class Jira:
         exact = [
             u for u in people if str(u.get("emailAddress") or "").casefold() == email.casefold()
         ]
-        hidden = [u for u in people if not u.get("emailAddress")]
-        chosen = exact if exact else hidden
-        return str(chosen[0]["accountId"]) if len(chosen) == 1 else ""
+        return str(exact[0]["accountId"]) if len(exact) == 1 else ""
 
     async def work(self, keys: list[str]) -> list[ProjectWork]:
         """Each project's open work and active sprint; a project Jira would not

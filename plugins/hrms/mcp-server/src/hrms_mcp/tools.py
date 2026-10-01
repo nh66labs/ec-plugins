@@ -74,8 +74,9 @@ anything pending, whether a piece of work will be affected while they are away �
 find the request with list_leave_requests_to_decide (status Approved if it was
 already approved), then call get_leave_request_impact with it. Answer from the
 tickets it lists: name the ones that bear on what was asked, by key and summary,
-and say plainly when none do. When it says Jira was not checked, say you could
-not check their tickets — never that they have none.
+and say plainly when none do — in the projects it checked, which you name; say
+that any other projects of theirs were not checked. When it says Jira was not
+checked, say you could not check their tickets — never that they have none.
 
 Every answer drawn from these tools cites the result it came from by its number,
 like [1], in the sentence that uses it — a list of holidays or balances too, and
@@ -528,7 +529,8 @@ async def their_jira(
 
     Their open tickets and a sprint of theirs that is tight, in the projects of
     the manager asking — which are the ones the applicant's leave is decided on.
-    """
+    The HRMS does not list the applicant's own projects, so it says that any
+    others were not checked."""
     if jira is None or not jira.configured or who == "Someone":
         return None
     try:
@@ -544,8 +546,11 @@ async def their_jira(
     if not work:
         return None
     settings = jira.settings
+    checked = ", ".join(p.key for p in work)
     return [
         workload.their_work(work, who, start, end, email=email, account=account),
+        f"Only the asker's own Jira projects were checked ({checked}); any other "
+        f"projects {who} works on were not.",
         *workload.tight_sprints(
             work, [who], start, end,
             tight_days=settings.sprint_tight_days,
