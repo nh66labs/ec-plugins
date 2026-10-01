@@ -497,6 +497,22 @@ def test_a_jira_that_does_not_answer_leaves_the_hrms_check_as_it_was(
     assert "Jira: Ticket ECP-2 is due on 2026-10-02." in said, "the HRMS's own Jira line stays"
 
 
+def test_the_hrms_jira_lines_about_tickets_not_named_stay_for_the_applicant(
+    checked: tuple[TestClient, FakeHrms],
+) -> None:
+    client, hrms = checked
+    hrms.results["preview_leave"]["briefing"] += [
+        "Jira: Ticket PAY-7 is due on 2026-10-02.",
+        "Jira: Ticket ECP-12 is due on 2026-10-02.",
+        "Jira: 2 open tickets due this week.",
+    ]
+    said = _preview(client)
+    assert "Jira: Ticket ECP-2 " not in said, "ECP-2 was named in the warning"
+    assert "Jira: Ticket ECP-12 is due on 2026-10-02." in said, "not found as theirs here"
+    assert "Jira: Ticket PAY-7 is due on 2026-10-02." in said, "PAY was not checked"
+    assert "Jira: 2 open tickets due this week." in said, "its projects are unknown"
+
+
 # -- a project manager asking about someone's leave -----------------------------------------
 
 
