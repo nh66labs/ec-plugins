@@ -176,17 +176,16 @@ def warning_of(sentences: list[str]) -> str:
     return f"Heads-up: {' '.join(said)} Do you still want to apply?" if said else ""
 
 
-def _briefing_lines(briefing: Any, *, jira_checked: bool = False) -> list[str]:
+def _briefing_lines(briefing: Any, *, said: str = "") -> list[str]:
     """The HRMS's own briefing — a list of lines, or text — without its team line,
-    which the warning above already says, nor its Jira lines when this server
-    read Jira itself and said what they say."""
+    which the warning above already says, nor a Jira line whose every ticket this
+    server already named (``said``). One naming a ticket not named — in a project
+    not read here, or not due around the leave — stays."""
     lines = briefing if isinstance(briefing, list) else str(briefing or "").splitlines()
     return [
         line
         for line in (str(item).strip() for item in lines)
-        if line
-        and not line.startswith("Team:")
-        and not (jira_checked and line.startswith("Jira:"))
+        if line and not line.startswith("Team:") and not _said_already(line, said)
     ]
 
 
@@ -414,7 +413,7 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
         parts = [warning, head] if warning else [head]
         if jira_note:
             parts.append(jira_note)
-        parts.extend(_briefing_lines(result.get("briefing"), jira_checked=from_jira is not None))
+        parts.extend(_briefing_lines(result.get("briefing"), said="\n".join(parts)))
         parts.append(await _approvers(hrms, ctx))
         parts.append("Nothing has been filed.")
         return "\n".join(parts)
