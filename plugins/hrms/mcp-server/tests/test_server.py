@@ -171,6 +171,7 @@ def _bindable(node: Any, path: str = "arguments") -> list[str]:
 READS = {
     "get_holidays", "get_my_leave_balance", "list_my_leaves", "get_leave_context",
     "preview_leave", "list_leave_requests_to_decide", "start_leave_request",
+    "get_leave_request_impact",
     "get_my_mbo_context", "get_my_mbo_plan",
 }
 WRITES = {"apply_leave", "cancel_my_leave", "approve_leave", "reject_leave", "save_my_mbo_plan"}

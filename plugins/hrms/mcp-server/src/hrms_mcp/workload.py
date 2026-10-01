@@ -13,6 +13,11 @@ the person's answer):
    be there to finish. It follows the sentence saying who is off, so it does
    not name them again.
 
+The first is also said to a project manager asking about someone else's leave
+(``their_work``): there it lists more, since the manager is matching the tickets
+against a piece of work they named ("will the payment integration be affected?"),
+and it says so when there are none, since "nothing pending" is an answer.
+
 "Tight" is the operator's to tune: the sprint ends within ``tight_days`` working
 days after the leave, and more than ``tight_share`` of its tickets are still to
 do or in progress.
@@ -26,6 +31,9 @@ from datetime import date, timedelta
 #: How many tickets a sentence names before it says "and N more".
 LISTED = 3
 
+#: How many a project manager is shown: enough to find the one they asked about.
+LISTED_FOR_MANAGER = 10
+
 
 @dataclass(frozen=True)
 class Ticket:
@@ -37,6 +45,9 @@ class Ticket:
     category: str
     assignee_name: str = ""
     assignee_email: str = ""
+    #: Jira's own id for the assignee — the one match that does not depend on
+    #: a name being spelt alike in two systems or an email Jira chose to show.
+    assignee_account: str = ""
     due: date | None = None
 
     @property
@@ -74,7 +85,12 @@ def working_days_after(start: date, end: date) -> int:
     return days
 
 
-def _is(ticket: Ticket, name: str, email: str) -> bool:
+def _is(ticket: Ticket, name: str, email: str, account: str = "") -> bool:
+    """Whether a ticket is this person's: by Jira account when both are known —
+    and then only by it — else by email, else by name. Names are the last resort:
+    "navaneeth" in Jira and "Navaneeth K" in the HRMS are one person."""
+    if account and ticket.assignee_account:
+        return ticket.assignee_account == account
     if email and ticket.assignee_email and ticket.assignee_email.casefold() == email.casefold():
         return True
     return bool(name) and ticket.assignee_name.casefold() == name.casefold()
@@ -88,9 +104,11 @@ def _ordered(tickets: list[Ticket]) -> list[Ticket]:
     )
 
 
-def _listed(tickets: list[Ticket], leave_from: date, leave_to: date) -> str:
+def _listed(
+    tickets: list[Ticket], leave_from: date, leave_to: date, limit: int = LISTED
+) -> str:
     shown = []
-    for ticket in _ordered(tickets)[:LISTED]:
+    for ticket in _ordered(tickets)[:limit]:
         detail = ticket.status
         if ticket.due and leave_from <= ticket.due <= leave_to:
             detail += f", due {_day(ticket.due)}"
@@ -102,9 +120,14 @@ def _listed(tickets: list[Ticket], leave_from: date, leave_to: date) -> str:
 
 
 def own_work(
-    projects: list[ProjectWork], name: str, email: str, leave_from: date, leave_to: date
+    projects: list[ProjectWork],
+    name: str,
+    email: str,
+    leave_from: date,
+    leave_to: date,
+    account: str = "",
 ) -> str:
-    mine = [t for p in projects for t in p.open_tickets if t.open and _is(t, name, email)]
+    mine = [t for p in projects for t in p.open_tickets if t.open and _is(t, name, email, account)]
     if not mine:
         return ""
     count = f"{len(mine)} open Jira ticket{'s' if len(mine) != 1 else ''}"
@@ -112,6 +135,28 @@ def own_work(
         f"You have {count}: {_listed(mine, leave_from, leave_to)} — "
         "worth handing over before you go."
     )
+
+
+def their_work(
+    projects: list[ProjectWork],
+    name: str,
+    leave_from: date,
+    leave_to: date,
+    *,
+    email: str = "",
+    account: str = "",
+) -> str:
+    """Someone else's open tickets, for the project manager asking about their
+    leave, said with their HRMS name."""
+    keys = ", ".join(p.key for p in projects)
+    theirs = [
+        t for p in projects for t in p.open_tickets if t.open and _is(t, name, email, account)
+    ]
+    if not theirs:
+        return f"{name} has no open Jira tickets in {keys}."
+    count = f"{len(theirs)} open Jira ticket{'s' if len(theirs) != 1 else ''}"
+    listed = _listed(theirs, leave_from, leave_to, LISTED_FOR_MANAGER)
+    return f"{name} has {count} in {keys}: {listed}."
 
 
 def tight_sprints(
