@@ -4,8 +4,21 @@ Pure rules over tickets already read — no I/O — so each is tested on its own
 Two warnings, both of which warn and never block (the Confirm that follows is
 the person's answer):
 
-1. **Their own open work.** Tickets assigned to the person asking that are not
-   done — worth handing over before they go.
+1. **Their own open work that the leave touches.** Each open ticket of theirs
+   is placed by its deadline — its due date, or else the end of the active
+   sprint it is in — against the leave:
+
+   - due **while they are away**;
+   - due **just after they are back** (within ``after_days`` working days);
+   - due **before they go**, said only when the leave starts within
+     ``soon_days`` working days of today — a ticket due next week is not a
+     handover for a leave six weeks off;
+   - **in progress with no deadline at all**, said only when the leave is as
+     soon, since that is work that stops when they do.
+
+   Those are named, with the date and what it means. Every other open ticket
+   is only counted: naming work the leave does not touch teaches people to
+   skip the warning.
 2. **A tight sprint with a teammate already off.** Someone on the same project
    has already applied for those days, and a sprint of that project's ends
    during the leave or soon after it with much of its work still open. Named
@@ -14,9 +27,11 @@ the person's answer):
    not name them again.
 
 The first is also said to a project manager asking about someone else's leave
-(``their_work``): there it lists more, since the manager is matching the tickets
-against a piece of work they named ("will the payment integration be affected?"),
-and it says so when there are none, since "nothing pending" is an answer.
+(``their_work``): there the tickets the leave touches come first, and then the
+rest are named too while there is room, since the manager is matching them
+against a piece of work they named ("will the payment integration be
+affected?"). It says so when there are none, since "nothing pending" is an
+answer.
 
 "Tight" is the operator's to tune: the sprint ends within ``tight_days`` working
 days after the leave, and more than ``tight_share`` of its tickets are still to
@@ -33,6 +48,18 @@ LISTED = 3
 
 #: How many a project manager is shown: enough to find the one they asked about.
 LISTED_FOR_MANAGER = 10
+
+#: A deadline this many working days after the leave still falls on it: the
+#: work is done during the days off.
+AFTER_DAYS = 3
+
+#: A leave starting within this many working days of today is soon enough that
+#: work due before it, or in progress with no deadline, is a handover.
+SOON_DAYS = 5
+
+# Where a ticket stands against the leave, most pressing first. Every one but
+# ``UNTOUCHED`` is named.
+AWAY, AFTER, BEFORE, UNDATED, UNTOUCHED = range(5)
 
 
 @dataclass(frozen=True)
@@ -122,6 +149,105 @@ def _listed(
     return shown[0] if len(shown) == 1 else f"{', '.join(shown[:-1])} and {shown[-1]}"
 
 
+@dataclass(frozen=True)
+class _Placed:
+    ticket: Ticket
+    where: int
+    deadline: date | None
+    #: What the deadline means for this leave, after the ticket's status.
+    note: str
+
+    def __str__(self) -> str:
+        detail = f"{self.ticket.status}, {self.note}" if self.note else self.ticket.status
+        return f"{self.ticket.key} {self.ticket.summary} ({detail})"
+
+
+def _sprint_ends(projects: list[ProjectWork]) -> dict[str, Sprint]:
+    """Each ticket in an active sprint, to the sprint — the deadline of one that has
+    no due date of its own."""
+    return {
+        t.key: p.sprint for p in projects if p.sprint is not None for t in p.sprint.tickets
+    }
+
+
+def _place(
+    ticket: Ticket,
+    sprint: Sprint | None,
+    leave_from: date,
+    leave_to: date,
+    today: date | None,
+    after_days: int,
+    soon_days: int,
+    you: bool,
+) -> _Placed:
+    away, back, go = (
+        ("you're away", "you're back", "you go") if you
+        else ("they're away", "they're back", "they go")
+    )
+    soon = today is not None and working_days_after(today, leave_from) <= soon_days
+    deadline = ticket.due or (sprint.ends if sprint else None)
+    if deadline is None:
+        if ticket.category == "indeterminate" and soon:
+            return _Placed(ticket, UNDATED, None, "no due date")
+        return _Placed(ticket, UNTOUCHED, None, "")
+    when = (
+        f"due {_day(deadline)}" if ticket.due
+        else f"no due date; sprint “{sprint.name}” ends {_day(deadline)}"  # type: ignore[union-attr]
+    )
+    if leave_from <= deadline <= leave_to:
+        return _Placed(ticket, AWAY, deadline, f"{when}, while {away}")
+    if deadline > leave_to:
+        after = working_days_after(leave_to, deadline)
+        if after <= after_days:
+            day = f"the day {back}" if after == 1 else f"just after {back}"
+            return _Placed(ticket, AFTER, deadline, f"{when}, {day}")
+        return _Placed(ticket, UNTOUCHED, deadline, when)
+    if not soon:
+        return _Placed(ticket, UNTOUCHED, deadline, when)
+    if today is not None and deadline < today:
+        if ticket.due:
+            return _Placed(ticket, BEFORE, deadline, f"overdue since {_day(deadline)}")
+        # A sprint left open past its end: the date is missed, not ahead.
+        return _Placed(
+            ticket, BEFORE, deadline,
+            f"no due date; sprint “{sprint.name}” ended {_day(deadline)}",  # type: ignore[union-attr]
+        )
+    return _Placed(ticket, BEFORE, deadline, f"{when}, before {go}")
+
+
+def _placed(
+    projects: list[ProjectWork],
+    tickets: list[Ticket],
+    leave_from: date,
+    leave_to: date,
+    today: date | None,
+    after_days: int,
+    soon_days: int,
+    you: bool,
+) -> list[_Placed]:
+    """Most pressing first; then soonest deadline, in progress before to do, by key."""
+    sprints = _sprint_ends(projects)
+    placed = [
+        _place(t, sprints.get(t.key), leave_from, leave_to, today, after_days, soon_days, you)
+        for t in tickets
+    ]
+    return sorted(placed, key=lambda p: (
+        p.where, p.deadline or date.max, p.ticket.category != "indeterminate", p.ticket.key,
+    ))
+
+
+def _named(placed: list[_Placed], limit: int, more: str = "more") -> str:
+    shown = [str(p) for p in placed[:limit]]
+    rest = len(placed) - len(shown)
+    if rest:
+        shown.append(f"{rest} {more}")
+    return shown[0] if len(shown) == 1 else f"{', '.join(shown[:-1])} and {shown[-1]}"
+
+
+def _tickets(count: int) -> str:
+    return f"{count} open Jira ticket{'s' if count != 1 else ''}"
+
+
 def own_work(
     projects: list[ProjectWork],
     name: str,
@@ -129,15 +255,32 @@ def own_work(
     leave_from: date,
     leave_to: date,
     account: str = "",
-) -> str:
+    *,
+    today: date | None = None,
+    after_days: int = AFTER_DAYS,
+    soon_days: int = SOON_DAYS,
+) -> tuple[str, str]:
+    """The person's own open work, as ``(warning, note)``: the warning names the
+    tickets the leave touches; the note, when it touches none, says the rest were
+    looked at — information, not a reason to think twice. Either may be empty.
+    ``today`` unknown, the leave is taken to be far off."""
     mine = [t for p in projects for t in p.open_tickets if t.open and _is(t, name, email, account)]
     if not mine:
-        return ""
-    count = f"{len(mine)} open Jira ticket{'s' if len(mine) != 1 else ''}"
-    return (
-        f"You have {count}: {_listed(mine, leave_from, leave_to)} — "
-        "worth handing over before you go."
+        return "", ""
+    placed = _placed(projects, mine, leave_from, leave_to, today, after_days, soon_days, True)
+    named = [p for p in placed if p.where != UNTOUCHED]
+    rest = len(placed) - len(named)
+    if not named:
+        if rest == 1:
+            return "", "Your 1 open Jira ticket is not due around your leave."
+        return "", f"None of your {_tickets(rest)} are due around your leave."
+    warning = (
+        f"You have {_tickets(len(named))} to hand over before you go: {_named(named, LISTED)}."
     )
+    if rest:
+        other = f"{rest} other open ticket{'s' if rest != 1 else ''}"
+        warning += f" {other} of yours {'are' if rest != 1 else 'is'} not due around your leave."
+    return warning, ""
 
 
 def their_work(
@@ -148,9 +291,13 @@ def their_work(
     *,
     email: str = "",
     account: str = "",
+    today: date | None = None,
+    after_days: int = AFTER_DAYS,
+    soon_days: int = SOON_DAYS,
 ) -> str:
     """Someone else's open tickets, for the project manager asking about their
-    leave, said with their HRMS name.
+    leave, said with their HRMS name: those the leave touches first, then the
+    rest while there is room.
 
     "None" is said only when it is sure: when their Jira account is known and
     every open ticket was read. Otherwise it says what may have been missed —
@@ -176,9 +323,30 @@ def their_work(
         if unsure:
             return f"No open Jira tickets in {keys} were found for {name}.{caveat}"
         return f"{name} has no open Jira tickets in {keys}."
-    count = f"{len(theirs)} open Jira ticket{'s' if len(theirs) != 1 else ''}"
-    listed = _listed(theirs, leave_from, leave_to, LISTED_FOR_MANAGER)
-    return f"{name} has {count} in {keys}: {listed}.{caveat}"
+    placed = _placed(projects, theirs, leave_from, leave_to, today, after_days, soon_days, False)
+    named = [p for p in placed if p.where != UNTOUCHED]
+    rest = [p for p in placed if p.where == UNTOUCHED]
+    room = max(LISTED_FOR_MANAGER - len(named), 0)
+    if named:
+        if not rest:
+            which = f", {'all ' if len(named) != 1 else ''}affected by this leave"
+        else:
+            verb = "are" if len(named) != 1 else "is"
+            which = f"; {len(named)} {verb} affected by this leave"
+        said = (
+            f"{name} has {_tickets(len(placed))} in {keys}{which}: "
+            f"{_named(named, LISTED_FOR_MANAGER)}."
+        )
+        if rest:
+            also = _named(rest, room) if room else f"{len(rest)} more"
+            said += f" Also open, not affected by the leave: {also}."
+    else:
+        none = (
+            f"{name}'s 1 open Jira ticket in {keys} is not" if len(placed) == 1
+            else f"None of {name}'s {_tickets(len(placed))} in {keys} are"
+        )
+        said = f"{none} affected by this leave: {_named(rest, LISTED_FOR_MANAGER)}."
+    return said + caveat
 
 
 def tight_sprints(
