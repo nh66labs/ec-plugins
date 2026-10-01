@@ -167,7 +167,11 @@ def tight_sprints(
     *,
     tight_days: int,
     tight_share: float,
+    email: str = "",
+    account: str = "",
 ) -> list[str]:
+    """``email`` and ``account`` are those of the one person off, when only one
+    is and they are known; anyone else is found by name."""
     if not teammates_off:
         return []
     said = []
@@ -180,7 +184,10 @@ def tight_sprints(
         still_open = [t for t in sprint.tickets if t.open]
         if len(still_open) / len(sprint.tickets) <= tight_share:
             continue
-        theirs = [t for t in still_open if any(_is(t, n, "") for n in teammates_off)]
+        if len(teammates_off) == 1:
+            theirs = [t for t in still_open if _is(t, teammates_off[0], email, account)]
+        else:
+            theirs = [t for t in still_open if any(_is(t, n, "") for n in teammates_off)]
         sentence = (
             f"{project.key}'s sprint “{sprint.name}” ends on {_day(sprint.ends)} with "
             f"{len(still_open)} of {len(sprint.tickets)} tickets still to do or in progress"

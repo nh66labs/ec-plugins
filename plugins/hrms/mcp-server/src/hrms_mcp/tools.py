@@ -550,6 +550,8 @@ async def their_jira(
             work, [who], start, end,
             tight_days=settings.sprint_tight_days,
             tight_share=settings.sprint_tight_open_share,
+            email=email,
+            account=account,
         ),
     ]
 
