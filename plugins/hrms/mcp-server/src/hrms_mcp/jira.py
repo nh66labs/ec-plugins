@@ -47,6 +47,7 @@ def ticket_of(issue: dict[str, Any]) -> Ticket:
         category=str((status.get("statusCategory") or {}).get("key") or "new"),
         assignee_name=str(assignee.get("displayName") or ""),
         assignee_email=str(assignee.get("emailAddress") or ""),
+        assignee_account=str(assignee.get("accountId") or ""),
         due=_date(fields.get("duedate")),
     )
 
@@ -146,6 +147,31 @@ class Jira:
             open_tickets=[ticket_of(i) for i in await self._open_issues(http, key)],
             sprint=await self._sprint(http, key),
         )
+
+    async def account_of(self, email: str) -> str:
+        """The Jira account a work email belongs to, or "" when Jira does not say.
+
+        Jira finds a person by their email even when it hides that email on
+        their tickets, which is why this is asked rather than read off a ticket.
+        Only an unambiguous answer counts: one person, or the one whose email
+        Jira shows as exactly this."""
+        if not email:
+            return ""
+        try:
+            async with self._client() as http:
+                found = await asyncio.wait_for(
+                    self._get(http, "/rest/api/3/user/search", {"query": email}),
+                    timeout=self.settings.jira_timeout_seconds,
+                )
+        except (TimeoutError, httpx.HTTPError, ValueError):
+            log.info("jira account lookup skipped: no answer")
+            return ""
+        people = [u for u in found or [] if isinstance(u, dict) and u.get("accountId")]
+        exact = [
+            u for u in people if str(u.get("emailAddress") or "").casefold() == email.casefold()
+        ]
+        chosen = exact if exact else people
+        return str(chosen[0]["accountId"]) if len(chosen) == 1 else ""
 
     async def work(self, keys: list[str]) -> list[ProjectWork]:
         """Each project's open work and active sprint; a project Jira would not

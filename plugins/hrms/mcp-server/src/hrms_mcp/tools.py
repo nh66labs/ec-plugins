@@ -69,6 +69,14 @@ to find the request, then approve_leave or reject_leave. A rejection needs a
 reason: if the person gave one ("because of the pending deployment"), use their
 words and do not ask again; only if they gave none, ask for it.
 
+Asked about someone's leave as their project manager or HR — whether they have
+anything pending, whether a piece of work will be affected while they are away —
+find the request with list_leave_requests_to_decide (status Approved if it was
+already approved), then call get_leave_request_impact with it. Answer from the
+tickets it lists: name the ones that bear on what was asked, by key and summary,
+and say plainly when none do. When it says Jira was not checked, say you could
+not check their tickets — never that they have none.
+
 Every answer drawn from these tools cites the result it came from by its number,
 like [1], in the sentence that uses it — a list of holidays or balances too, and
 an answer that there is nothing (no requests to decide, no leave taken). An
@@ -196,7 +204,10 @@ async def jira_sentences(
     except (ToolError, ValueError):
         return None
     names = [str(p.get("name") or "") for p in projects if isinstance(p, dict)]
-    work = await jira.work(project_keys(jira.settings, names))
+    email = str(session.get("company_email") or "")
+    work, account = await asyncio.gather(
+        jira.work(project_keys(jira.settings, names)), jira.account_of(email)
+    )
     if not work:
         return None
     settings = jira.settings
@@ -207,8 +218,7 @@ async def jira_sentences(
             tight_share=settings.sprint_tight_open_share,
         ),
         workload.own_work(
-            work, str(session.get("name") or ""), str(session.get("company_email") or ""),
-            start, end,
+            work, str(session.get("name") or ""), email, start, end, account=account
         ),
     ]
 
@@ -417,6 +427,132 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
             lines.append(f"…and {more} more not shown.")
         return "\n".join(lines)
 
+    @server.tool(annotations=READ_ONLY, structured_output=False)
+    async def get_leave_request_impact(request_id: str, ctx: Context) -> str:
+        """What one leave request on the asker's team would leave undone, for the
+        project manager or HR asking about it: the applicant's open Jira tickets
+        by key and summary, a sprint of theirs that is tight, and the HRMS's own
+        briefing — meetings that day, teammates also off, balance. request_id
+        comes from list_leave_requests_to_decide; never show it to the person."""
+        identity = _identity(ctx)
+        item = None
+        for status in IMPACT_STATUSES:
+            try:
+                leaves = await hrms.call("get_team_leaves", {"status": status}, identity)
+            except HrmsError as error:
+                if "access denied" in str(error).lower():
+                    return (
+                        "The person asking has no team whose leave they decide — only "
+                        "project managers and HR can ask about someone else's leave."
+                    )
+                raise ToolError(str(error)) from None
+            item = next(
+                (i for i in leaves or [] if str(i.get("leave_id") or i.get("id")) == request_id),
+                None,
+            )
+            if item is not None:
+                break
+        if item is None:
+            # Only a request the HRMS lists as the asker's team's is described:
+            # the HRMS decides whose leave a manager may see, not the id passed.
+            raise ToolError(
+                "That is not a pending or approved leave request on your team. "
+                "Find it with list_leave_requests_to_decide."
+            )
+        routed = await _routing(hrms, ctx, request_id)
+        who = str(routed.get("employee") or "Someone")
+        date_from = str(item.get("date_from", ""))
+        date_to = str(item.get("date_to", "")) or date_from
+        lines = [
+            f"{who} — {kind_of(item.get('type', ''))}, {when_of(date_from, date_to)}, "
+            f"{portion_of(item.get('mode', ''))}, {item.get('status', '')}. "
+            f"Reason: {item.get('reason') or 'none given'}."
+        ]
+        from_jira = await their_jira(hrms, jira, ctx, who, date_from, date_to)
+        lines.extend(from_jira or ["Jira was not checked, so their open tickets are unknown."])
+        lines.extend(_briefing_for_manager(routed.get("briefing"), jira_checked=bool(from_jira)))
+        return "\n".join(lines)
+
+
+#: The requests a manager may ask about: one still to decide, or one already
+#: approved whose days are still ahead of the team.
+IMPACT_STATUSES = ("Pending", "Approved")
+
+
+async def _routing(hrms: Hrms, ctx: Context, leave_id: str) -> dict[str, Any]:
+    """The HRMS's routing of a request — who applied, and its briefing — or
+    nothing when the HRMS will not say."""
+    try:
+        routed = await hrms.call("get_leave_routing", {"leave_id": leave_id}, _identity(ctx))
+    except HrmsError:
+        return {}
+    return routed if isinstance(routed, dict) else {}
+
+
+def _briefing_for_manager(briefing: Any, *, jira_checked: bool) -> list[str]:
+    """The HRMS's briefing, which is worded to the applicant, said about them.
+
+    Its team line stays — nothing above says it to the manager — and its Jira
+    lines go when this server read Jira itself and said what they say."""
+    lines = briefing if isinstance(briefing, list) else str(briefing or "").splitlines()
+    said = []
+    for line in (str(item).strip() for item in lines):
+        if not line or (jira_checked and line.startswith("Jira:")):
+            continue
+        said.append(line.replace(" — you attend.", " — they attend.").replace(
+            " — you organize.", " — they organize."
+        ))
+    return said
+
+
+async def _email_of(hrms: Hrms, ctx: Context, name: str) -> str:
+    """The work email of the one employee the HRMS calls exactly this, or "".
+
+    The HRMS names an applicant and nothing more; their email is what finds them
+    in Jira, where their name may be spelt differently."""
+    try:
+        found = await _ask(hrms, ctx, "resolve_employee", {"query": name})
+    except ToolError:
+        return ""
+    same = [
+        p for p in found or []
+        if isinstance(p, dict) and str(p.get("name") or "").casefold() == name.casefold()
+    ]
+    return str(same[0].get("company_email") or "") if len(same) == 1 else ""
+
+
+async def their_jira(
+    hrms: Hrms, jira: Jira | None, ctx: Context, who: str, date_from: str, date_to: str
+) -> list[str] | None:
+    """What Jira says about someone else's leave, or None when Jira was not read.
+
+    Their open tickets and a sprint of theirs that is tight, in the projects of
+    the manager asking — which are the ones the applicant's leave is decided on.
+    """
+    if jira is None or not jira.configured or who == "Someone":
+        return None
+    try:
+        start, end = date.fromisoformat(date_from), date.fromisoformat(date_to)
+        projects = await _ask(hrms, ctx, "get_my_projects", {}) or []
+    except (ToolError, ValueError):
+        return None
+    names = [str(p.get("name") or "") for p in projects if isinstance(p, dict)]
+    email = await _email_of(hrms, ctx, who)
+    work, account = await asyncio.gather(
+        jira.work(project_keys(jira.settings, names)), jira.account_of(email)
+    )
+    if not work:
+        return None
+    settings = jira.settings
+    return [
+        workload.their_work(work, who, start, end, email=email, account=account),
+        *workload.tight_sprints(
+            work, [who], start, end,
+            tight_days=settings.sprint_tight_days,
+            tight_share=settings.sprint_tight_open_share,
+        ),
+    ]
+
 
 _WEEK = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 
@@ -457,13 +593,7 @@ async def _approvers(hrms: Hrms, ctx: Context) -> str:
 async def describe_request(hrms: Hrms, ctx: Context, item: dict[str, Any]) -> str:
     """One team request as a line: who, what, when, why, then its id."""
     leave_id = str(item.get("leave_id") or item.get("id") or "")
-    who = "Someone"
-    try:
-        routed = await hrms.call("get_leave_routing", {"leave_id": leave_id}, _identity(ctx))
-        if isinstance(routed, dict) and routed.get("employee"):
-            who = str(routed["employee"])
-    except HrmsError:
-        pass
+    who = str((await _routing(hrms, ctx, leave_id)).get("employee") or "Someone")
     when = when_of(str(item.get("date_from", "")), str(item.get("date_to", "")))
     return (
         f"{who} — {kind_of(item.get('type', ''))}, {when}, {portion_of(item.get('mode', ''))}, "

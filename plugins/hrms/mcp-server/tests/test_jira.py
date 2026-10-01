@@ -18,7 +18,14 @@ from starlette.testclient import TestClient
 from hrms_mcp.app import create_app
 from hrms_mcp.config import Settings
 from hrms_mcp.jira import Jira, project_keys, ticket_of
-from hrms_mcp.workload import ProjectWork, Sprint, Ticket, own_work, tight_sprints
+from hrms_mcp.workload import (
+    ProjectWork,
+    Sprint,
+    Ticket,
+    own_work,
+    their_work,
+    tight_sprints,
+)
 from tests.test_server import EC_TOKEN, FakeHrms, call, text
 
 FRI, MON = date(2026, 10, 2), date(2026, 10, 5)
@@ -94,6 +101,35 @@ def test_a_sprint_that_is_not_tight_or_no_one_off_is_not_warned_of(
     assert tight_sprints(work, off, FRI, FRI, tight_days=3, tight_share=0.3) == [], why
 
 
+def test_a_manager_is_shown_the_applicants_open_tickets_or_told_there_are_none() -> None:
+    work = [ProjectWork("ECP", open_tickets=[
+        _t("ECP-7", "Anu", "indeterminate"), _t("ECP-8", "Ravi"), _t("ECP-9", "Anu", "done"),
+    ])]
+    assert their_work(work, "Anu", FRI, FRI) == (
+        "Anu has 1 open Jira ticket in ECP: ECP-7 Task ECP-7 (In Progress)."
+    )
+    assert their_work(work, "Priya", FRI, FRI) == "Priya has no open Jira tickets in ECP."
+
+
+def test_a_manager_is_shown_up_to_ten_of_them() -> None:
+    work = [ProjectWork("ECP", open_tickets=[_t(f"ECP-{i}", "Anu") for i in range(12)])]
+    said = their_work(work, "Anu", FRI, FRI)
+    assert said.count("(To Do)") == 10
+    assert said.endswith("and 2 more.")
+
+
+def test_a_person_is_matched_by_jira_account_before_any_name() -> None:
+    theirs = _t("ECP-7", "navaneeth", "indeterminate", assignee_account="acc-nav")
+    namesake = _t("ECP-8", "Navaneeth K", assignee_account="acc-other")
+    work = [ProjectWork("ECP", open_tickets=[theirs, namesake])]
+    assert their_work(work, "Navaneeth K", FRI, FRI, account="acc-nav") == (
+        "Navaneeth K has 1 open Jira ticket in ECP: ECP-7 Task ECP-7 (In Progress)."
+    )
+    assert own_work(work, "Navaneeth K", "", FRI, FRI, account="acc-nav").startswith(
+        "You have 1 open Jira ticket: ECP-7"
+    )
+
+
 # -- reading Jira ----------------------------------------------------------------------
 
 
@@ -109,11 +145,14 @@ def _settings(**over: Any) -> Settings:
     return Settings(_env_file=None, **values)
 
 
-def _issue(key: str, who: str, category: str = "indeterminate") -> dict[str, Any]:
+def _issue(
+    key: str, who: str, category: str = "indeterminate", account: str = ""
+) -> dict[str, Any]:
+    assignee = {"displayName": who, **({"accountId": account} if account else {})}
     return {"key": key, "fields": {
         "summary": f"Task {key}",
         "status": {"name": "In Progress", "statusCategory": {"key": category}},
-        "assignee": {"displayName": who}, "duedate": None,
+        "assignee": assignee, "duedate": None,
     }}
 
 
@@ -126,6 +165,8 @@ class FakeJira:
         self.refuse = False
         self.paged = False
         self.paths: list[str] = []
+        #: Who Jira's user search finds, by the query it was given.
+        self.users: dict[str, list[dict[str, Any]]] = {}
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.paths.append(request.url.path)
@@ -154,6 +195,8 @@ class FakeJira:
                     "issues": self.sprint[start:start + 4], "total": len(self.sprint),
                 })
             return httpx.Response(200, json={"issues": self.sprint})
+        if path == "/rest/api/3/user/search":
+            return httpx.Response(200, json=self.users.get(request.url.params["query"], []))
         return httpx.Response(404)
 
 
@@ -188,6 +231,20 @@ def test_a_jira_that_refuses_is_skipped_not_failed() -> None:
     fake = FakeJira()
     fake.refuse = True
     assert asyncio.run(Jira(_settings(), httpx.MockTransport(fake.handler)).work(["ECP"])) == []
+
+
+def test_an_account_is_found_by_email_only_when_jira_is_sure() -> None:
+    fake = FakeJira()
+    fake.users = {
+        "nav@acme.test": [{"accountId": "acc-nav", "displayName": "navaneeth"}],
+        "two@acme.test": [{"accountId": "a1"}, {"accountId": "a2"}],
+    }
+    jira = Jira(_settings(), transport=httpx.MockTransport(fake.handler))
+    assert asyncio.run(jira.account_of("nav@acme.test")) == "acc-nav"
+    assert asyncio.run(jira.account_of("two@acme.test")) == "", "ambiguous"
+    assert asyncio.run(jira.account_of("nobody@acme.test")) == ""
+    fake.refuse = True
+    assert asyncio.run(jira.account_of("nav@acme.test")) == "", "a refusal is no account"
 
 
 def test_unconfigured_jira_is_never_called() -> None:
@@ -260,3 +317,110 @@ def test_a_jira_that_does_not_answer_leaves_the_hrms_check_as_it_was(
         "to approve. Do you still want to apply?"
     )
     assert "Jira: Ticket ECP-2 is due on 2026-10-02." in said, "the HRMS's own Jira line stays"
+
+
+# -- a project manager asking about someone's leave -----------------------------------------
+
+
+@pytest.fixture()
+def managing(jira: FakeJira):
+    hrms = FakeHrms()
+    hrms.results["get_user_session"] = {"authenticated": True, "name": "Priya"}
+    hrms.results["get_my_projects"] = [{"name": "EC Platform"}]
+    hrms.results["get_leave_routing"] = {
+        "leave_id": "lv-9", "employee": "Anu",
+        "briefing": [
+            'Calendar: "Payments sync" (10:00) — you attend.',
+            "Team: 1 teammate(s) already on leave that day: [Bala].",
+            "Jira: Ticket ECP-1 is due on 2026-10-01.",
+            "Balance: 9.0 Casual Leave day(s) available; this request uses 1.0.",
+        ],
+    }
+    app = create_app(
+        _settings(),
+        hrms_transport=httpx.MockTransport(hrms.handler),
+        jira_transport=httpx.MockTransport(jira.handler),
+    )
+    with TestClient(app, base_url="http://hrms-mcp:8000") as client:
+        yield client, hrms
+
+
+def _impact(client: TestClient, request_id: str = "lv-9") -> dict:
+    return call(client, "get_leave_request_impact", {"request_id": request_id})
+
+
+def test_a_manager_asking_about_a_request_is_told_what_the_applicant_leaves_undone(
+    managing: tuple[TestClient, FakeHrms],
+) -> None:
+    client, _ = managing
+    assert text(_impact(client)).splitlines() == [
+        "Anu — Casual leave, Thu 1 Oct 2026, full day, Pending. Reason: family function.",
+        "Anu has 1 open Jira ticket in ECP: ECP-1 Task ECP-1 (In Progress).",
+        "ECP's sprint “Sprint 14” ends on Mon 5 Oct with 6 of 10 tickets still to do or in "
+        "progress, including Anu's ECP-1 Task ECP-1 (In Progress).",
+        'Calendar: "Payments sync" (10:00) — they attend.',
+        "Team: 1 teammate(s) already on leave that day: [Bala].",
+        "Balance: 9.0 Casual Leave day(s) available; this request uses 1.0.",
+    ]
+
+
+def test_an_approved_request_can_be_asked_about_too(
+    managing: tuple[TestClient, FakeHrms],
+) -> None:
+    client, hrms = managing
+    hrms.results["get_team_leaves"][0]["status"] = "Approved"
+    said = text(_impact(client))
+    assert said.startswith("Anu — Casual leave, Thu 1 Oct 2026, full day, Approved.")
+
+
+def test_a_request_not_on_the_askers_team_is_not_described(
+    managing: tuple[TestClient, FakeHrms],
+) -> None:
+    client, hrms = managing
+    refused = _impact(client, "someone-elses")
+    assert refused["isError"] is True
+    assert "get_leave_routing" not in [c["name"] for c in hrms.calls()]
+
+
+def test_someone_who_manages_nobody_cannot_ask_about_others_leave(
+    managing: tuple[TestClient, FakeHrms],
+) -> None:
+    client, hrms = managing
+    hrms.errors["get_team_leaves"] = "access denied: only project managers and admins can view"
+    assert "only project managers and HR" in text(_impact(client))
+
+
+def test_without_jira_the_manager_is_told_it_was_not_checked_and_keeps_the_hrms_lines(
+    managing: tuple[TestClient, FakeHrms], jira: FakeJira
+) -> None:
+    client, _ = managing
+    jira.refuse = True
+    said = text(_impact(client))
+    assert "Jira was not checked, so their open tickets are unknown." in said
+    assert "Jira: Ticket ECP-1 is due on 2026-10-01." in said
+
+
+def test_the_applicant_is_found_in_jira_by_their_hrms_email_whatever_jira_calls_them(
+    managing: tuple[TestClient, FakeHrms], jira: FakeJira
+) -> None:
+    client, hrms = managing
+    hrms.results["resolve_employee"] = [
+        {"id": "emp-7", "name": "Anu", "company_email": "anu@acme.test"},
+        {"id": "emp-8", "name": "Anu Mathew", "company_email": "anu.m@acme.test"},
+    ]
+    jira.users = {"anu@acme.test": [{"accountId": "acc-anu", "displayName": "anu.k"}]}
+    jira.open = [
+        _issue("ECP-5", "anu.k", account="acc-anu"),
+        _issue("ECP-1", "Anu", account="acc-someone-else"),
+    ]
+    said = text(_impact(client))
+    assert "Anu has 1 open Jira ticket in ECP: ECP-5 Task ECP-5 (In Progress)." in said
+
+
+def test_the_employee_is_warned_of_tickets_jira_files_under_another_name(
+    checked: tuple[TestClient, FakeHrms], jira: FakeJira
+) -> None:
+    client, _ = checked
+    jira.users = {"ravi@acme.test": [{"accountId": "acc-ravi", "displayName": "ravi.k"}]}
+    jira.open = [_issue("ECP-3", "ravi.k", account="acc-ravi")]
+    assert "You have 1 open Jira ticket: ECP-3 Task ECP-3 (In Progress)" in _preview(client)
