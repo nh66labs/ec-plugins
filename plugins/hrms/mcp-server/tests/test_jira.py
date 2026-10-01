@@ -85,6 +85,16 @@ def test_a_tight_sprint_with_a_teammate_off_names_their_open_tickets() -> None:
     )
 
 
+def test_the_one_person_off_is_found_in_a_tight_sprint_by_their_jira_account() -> None:
+    sprint = _sprint(open_count=6, done=4, who="navaneeth")
+    sprint.tickets[0] = _t("ECP-1", "navaneeth", "indeterminate", assignee_account="acc-nav")
+    work = [ProjectWork("ECP", sprint=sprint)]
+    (said,) = tight_sprints(
+        work, ["Navaneeth K"], FRI, FRI, tight_days=3, tight_share=0.3, account="acc-nav"
+    )
+    assert said.endswith(", including Navaneeth K's ECP-1 Task ECP-1 (In Progress).")
+
+
 @pytest.mark.parametrize(
     ("off", "sprint", "why"),
     [
@@ -238,10 +248,18 @@ def test_an_account_is_found_by_email_only_when_jira_is_sure() -> None:
     fake.users = {
         "nav@acme.test": [{"accountId": "acc-nav", "displayName": "navaneeth"}],
         "two@acme.test": [{"accountId": "a1"}, {"accountId": "a2"}],
+        "jo@acme.test": [{"accountId": "acc-jo-au", "emailAddress": "jo@acme.test.au"}],
+        "sam@acme.test": [
+            {"accountId": "acc-sam", "emailAddress": "SAM@acme.test"},
+            {"accountId": "acc-sam2", "emailAddress": "sam@acme.test.au"},
+            {"accountId": "acc-hidden"},
+        ],
     }
     jira = Jira(_settings(), transport=httpx.MockTransport(fake.handler))
     assert asyncio.run(jira.account_of("nav@acme.test")) == "acc-nav"
     assert asyncio.run(jira.account_of("two@acme.test")) == "", "ambiguous"
+    assert asyncio.run(jira.account_of("jo@acme.test")) == "", "another email is someone else"
+    assert asyncio.run(jira.account_of("sam@acme.test")) == "acc-sam", "the exact email wins"
     assert asyncio.run(jira.account_of("nobody@acme.test")) == ""
     fake.refuse = True
     assert asyncio.run(jira.account_of("nav@acme.test")) == "", "a refusal is no account"
