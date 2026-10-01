@@ -492,11 +492,9 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
             f"Reason: {item.get('reason') or 'none given'}."
         ]
         from_jira = await their_jira(hrms, jira, ctx, who, date_from, date_to)
-        said, checked = from_jira or (
-            ["Jira was not checked, so their open tickets are unknown."], set()
-        )
+        said = from_jira or ["Jira was not checked, so their open tickets are unknown."]
         lines.extend(said)
-        lines.extend(_briefing_for_manager(routed.get("briefing"), checked=checked))
+        lines.extend(_briefing_for_manager(routed.get("briefing"), said=" ".join(said)))
         return "\n".join(lines)
 
 
@@ -515,32 +513,31 @@ async def _routing(hrms: Hrms, ctx: Context, leave_id: str) -> dict[str, Any]:
     return routed if isinstance(routed, dict) else {}
 
 
-_TICKET = re.compile(r"\b([A-Z][A-Z0-9_]*)-\d+\b")
+_TICKET = re.compile(r"\b[A-Z][A-Z0-9_]*-\d+\b")
 
 
-def _said_by_jira(line: str, checked: set[str]) -> bool:
-    """A Jira line of the HRMS's whose every ticket is in a project this server
-    read itself, so that what it says is already said above. One naming no
-    ticket, or a ticket elsewhere, may be about a project of the applicant's
-    the manager is not on, and stays."""
-    keys = {m.group(1) for m in _TICKET.finditer(line)}
-    return line.startswith("Jira:") and bool(keys) and keys <= checked
+def _said_already(line: str, said: str) -> bool:
+    """A Jira line of the HRMS's whose every ticket this server already named
+    (``said``). One naming no ticket, or a ticket not named — in a project the
+    manager is not on, or one Jira did not show as the applicant's — stays."""
+    keys = set(_TICKET.findall(line))
+    return line.startswith("Jira:") and bool(keys) and keys <= set(_TICKET.findall(said))
 
 
-def _briefing_for_manager(briefing: Any, *, checked: set[str]) -> list[str]:
+def _briefing_for_manager(briefing: Any, *, said: str) -> list[str]:
     """The HRMS's briefing, which is worded to the applicant, said about them.
 
     Its team line stays — nothing above says it to the manager — and its Jira
-    lines go when they are only about projects this server read (``checked``)."""
+    lines go when this server already named every ticket they name (``said``)."""
     lines = briefing if isinstance(briefing, list) else str(briefing or "").splitlines()
-    said = []
+    kept = []
     for line in (str(item).strip() for item in lines):
-        if not line or _said_by_jira(line, checked):
+        if not line or _said_already(line, said):
             continue
-        said.append(line.replace(" — you attend.", " — they attend.").replace(
+        kept.append(line.replace(" — you attend.", " — they attend.").replace(
             " — you organize.", " — they organize."
         ))
-    return said
+    return kept
 
 
 async def _email_of(hrms: Hrms, ctx: Context, name: str) -> str:
@@ -561,9 +558,8 @@ async def _email_of(hrms: Hrms, ctx: Context, name: str) -> str:
 
 async def their_jira(
     hrms: Hrms, jira: Jira | None, ctx: Context, who: str, date_from: str, date_to: str
-) -> tuple[list[str], set[str]] | None:
-    """What Jira says about someone else's leave, and the Jira projects it read;
-    or None when Jira was not read.
+) -> list[str] | None:
+    """What Jira says about someone else's leave, or None when Jira was not read.
 
     Their open tickets — those the leave touches first — and a sprint of theirs
     that is tight, in the projects of the manager asking — which are the ones
@@ -590,7 +586,7 @@ async def their_jira(
         return None
     settings = jira.settings
     checked = ", ".join(p.key for p in work)
-    return ([
+    return [
         workload.their_work(
             work, who, start, end, email=email, account=account,
             today=_today(session),
@@ -606,7 +602,7 @@ async def their_jira(
             email=email,
             account=account,
         ),
-    ], {p.key for p in work})
+    ]
 
 
 _WEEK = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")

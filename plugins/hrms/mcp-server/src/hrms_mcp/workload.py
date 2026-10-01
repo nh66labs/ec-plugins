@@ -198,6 +198,10 @@ def _place(
         return _Placed(ticket, AWAY, deadline, f"{when}, while {away}")
     if deadline > leave_to:
         after = working_days_after(leave_to, deadline)
+        if after == 0:
+            # The weekend or holiday straight after the leave: it passes before
+            # they are back.
+            return _Placed(ticket, AWAY, deadline, f"{when}, while {away}")
         if after <= after_days:
             day = f"the day {back}" if after == 1 else f"just after {back}"
             return _Placed(ticket, AFTER, deadline, f"{when}, {day}")
@@ -265,22 +269,29 @@ def own_work(
     looked at — information, not a reason to think twice. Either may be empty.
     ``today`` unknown, the leave is taken to be far off."""
     mine = [t for p in projects for t in p.open_tickets if t.open and _is(t, name, email, account)]
+    partial = [p.key for p in projects if not p.complete]
+    caveat = (
+        f"Only some of the open tickets in {', '.join(partial)} could be read, so some "
+        "of yours may not be counted." if partial else ""
+    )
     if not mine:
-        return "", ""
+        return "", caveat
     placed = _placed(projects, mine, leave_from, leave_to, today, after_days, soon_days, True)
     named = [p for p in placed if p.where != UNTOUCHED]
     rest = len(placed) - len(named)
     if not named:
         if rest == 1:
-            return "", "Your 1 open Jira ticket is not due around your leave."
-        return "", f"None of your {_tickets(rest)} are due around your leave."
+            note = "Your 1 open Jira ticket is not due around your leave."
+        else:
+            note = f"None of your {_tickets(rest)} are due around your leave."
+        return "", f"{note} {caveat}".rstrip()
     warning = (
         f"You have {_tickets(len(named))} to hand over before you go: {_named(named, LISTED)}."
     )
     if rest:
         other = f"{rest} other open ticket{'s' if rest != 1 else ''}"
         warning += f" {other} of yours {'are' if rest != 1 else 'is'} not due around your leave."
-    return warning, ""
+    return f"{warning} {caveat}".rstrip(), ""
 
 
 def their_work(
