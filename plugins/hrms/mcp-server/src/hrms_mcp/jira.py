@@ -119,8 +119,10 @@ class Jira:
             page = await self._get(http, "/rest/api/3/search/jql", params)
             issues.extend(page.get("issues") or [])
             token = page.get("nextPageToken")
-            if page.get("isLast", True) or not token:
-                return issues, True
+            # A page that does not say it is the last is not taken as one while
+            # it gives a next page; with none to give, only a "no" is a "no".
+            if page.get("isLast") is True or not token:
+                return issues, page.get("isLast") is not False
             if len(issues) >= _LIMIT:
                 return issues, False
             params = {**params, "nextPageToken": token}
