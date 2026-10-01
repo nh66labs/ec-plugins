@@ -117,6 +117,28 @@ def test_a_sprint_left_open_past_its_end_is_missed_not_ahead() -> None:
     )
 
 
+def test_a_deadline_on_the_weekend_straight_after_the_leave_falls_while_away() -> None:
+    work = [ProjectWork("ECP", open_tickets=[_t("ECP-1", "Ravi", due=date(2026, 10, 3))])]
+    assert own_work(work, "Ravi", "", FRI, FRI)[0] == (
+        "You have 1 open Jira ticket to hand over before you go: ECP-1 Task ECP-1 (To Do, "
+        "due Sat 3 Oct, while you're away)."
+    )
+
+
+def test_own_work_says_when_not_every_open_ticket_was_read() -> None:
+    caveat = (
+        "Only some of the open tickets in ECP could be read, so some of yours may not be counted."
+    )
+    far = [ProjectWork("ECP", open_tickets=[_t("ECP-1", "Ravi", due=date(2026, 10, 30))],
+                       complete=False)]
+    assert own_work(far, "Ravi", "", NOV12, NOV12, today=FAR) == (
+        "", f"Your 1 open Jira ticket is not due around your leave. {caveat}"
+    )
+    near = [ProjectWork("ECP", open_tickets=[_t("ECP-1", "Ravi", due=NOV12)], complete=False)]
+    assert own_work(near, "Ravi", "", NOV12, NOV12, today=FAR)[0].endswith(caveat)
+    assert own_work(far, "Bala", "", NOV12, NOV12, today=FAR) == ("", caveat)
+
+
 def test_the_operator_sets_how_long_after_the_leave_still_counts() -> None:
     warning, _ = own_work(
         _around_the_leave(), "Ravi", "", NOV12, NOV12, today=FAR, after_days=4
@@ -555,10 +577,12 @@ def test_the_hrms_jira_lines_about_projects_not_checked_stay_for_the_manager(
     client, hrms = managing
     hrms.results["get_leave_routing"]["briefing"] += [
         "Jira: Ticket PAY-7 is due on 2026-10-02.",
+        "Jira: Ticket ECP-12 is due on 2026-10-02.",
         "Jira: 2 open tickets due this week.",
     ]
     said = text(_impact(client))
-    assert "Jira: Ticket ECP-1" not in said, "ECP was checked and said above"
+    assert "Jira: Ticket ECP-1 " not in said, "ECP-1 was named above"
+    assert "Jira: Ticket ECP-12 is due on 2026-10-02." in said, "not found as theirs here"
     assert "Jira: Ticket PAY-7 is due on 2026-10-02." in said, "PAY was not checked"
     assert "Jira: 2 open tickets due this week." in said, "its projects are unknown"
 
