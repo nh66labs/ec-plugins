@@ -69,6 +69,9 @@ class ProjectWork:
     key: str
     open_tickets: list[Ticket] = field(default_factory=list)
     sprint: Sprint | None = None
+    #: False when Jira had more open tickets than were read, so someone's may
+    #: be among those that were not.
+    complete: bool = True
 
 
 def _day(value: date) -> str:
@@ -147,16 +150,35 @@ def their_work(
     account: str = "",
 ) -> str:
     """Someone else's open tickets, for the project manager asking about their
-    leave, said with their HRMS name."""
+    leave, said with their HRMS name.
+
+    "None" is said only when it is sure: when their Jira account is known and
+    every open ticket was read. Otherwise it says what may have been missed —
+    a manager told "none" takes it as the answer."""
     keys = ", ".join(p.key for p in projects)
     theirs = [
         t for p in projects for t in p.open_tickets if t.open and _is(t, name, email, account)
     ]
+    unsure = []
+    partial = [p.key for p in projects if not p.complete]
+    if partial:
+        unsure.append(
+            f"only some of the open tickets in {', '.join(partial)} could be read, "
+            "so some of theirs may not be listed"
+        )
+    if not account and not theirs:
+        unsure.append(
+            "their Jira account could not be confirmed, so tickets assigned to them "
+            "under another name in Jira would not be found"
+        )
+    caveat = f" Not certain: {'; and '.join(unsure)}." if unsure else ""
     if not theirs:
+        if unsure:
+            return f"No open Jira tickets in {keys} were found for {name}.{caveat}"
         return f"{name} has no open Jira tickets in {keys}."
     count = f"{len(theirs)} open Jira ticket{'s' if len(theirs) != 1 else ''}"
     listed = _listed(theirs, leave_from, leave_to, LISTED_FOR_MANAGER)
-    return f"{name} has {count} in {keys}: {listed}."
+    return f"{name} has {count} in {keys}: {listed}.{caveat}"
 
 
 def tight_sprints(

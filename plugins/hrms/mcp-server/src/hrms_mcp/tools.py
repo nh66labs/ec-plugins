@@ -77,6 +77,8 @@ tickets it lists: name the ones that bear on what was asked, by key and summary,
 and say plainly when none do — in the projects it checked, which you name; say
 that any other projects of theirs were not checked. When it says Jira was not
 checked, say you could not check their tickets — never that they have none.
+When it says it is not certain, say which tickets may have been missed and why —
+never that they have none.
 
 Every answer drawn from these tools cites the result it came from by its number,
 like [1], in the sentence that uses it — a list of holidays or balances too, and

@@ -105,23 +105,25 @@ class Jira:
                 break
         return issues
 
-    async def _open_issues(self, http: httpx.AsyncClient, key: str) -> list[Any]:
+    async def _open_issues(self, http: httpx.AsyncClient, key: str) -> tuple[list[Any], bool]:
         """Every open issue in a project, page by page, so the asker's own are
-        found however many the project has."""
+        found however many the project has — and whether that was all of them,
+        or reading stopped at ``_LIMIT``."""
         issues: list[Any] = []
         params: dict[str, Any] = {
             "jql": f'project = "{key}" AND statusCategory != Done',
             "fields": _FIELDS,
             "maxResults": 100,
         }
-        while len(issues) < _LIMIT:
+        while True:
             page = await self._get(http, "/rest/api/3/search/jql", params)
             issues.extend(page.get("issues") or [])
             token = page.get("nextPageToken")
             if page.get("isLast", True) or not token:
-                break
+                return issues, True
+            if len(issues) >= _LIMIT:
+                return issues, False
             params = {**params, "nextPageToken": token}
-        return issues
 
     async def _sprint(self, http: httpx.AsyncClient, key: str) -> Sprint | None:
         boards = await self._get(http, "/rest/agile/1.0/board", {"projectKeyOrId": key})
@@ -142,10 +144,12 @@ class Jira:
         return None
 
     async def _project(self, http: httpx.AsyncClient, key: str) -> ProjectWork:
+        issues, complete = await self._open_issues(http, key)
         return ProjectWork(
             key=key,
-            open_tickets=[ticket_of(i) for i in await self._open_issues(http, key)],
+            open_tickets=[ticket_of(i) for i in issues],
             sprint=await self._sprint(http, key),
+            complete=complete,
         )
 
     async def account_of(self, email: str) -> str:

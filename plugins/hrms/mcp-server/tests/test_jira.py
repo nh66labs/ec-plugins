@@ -15,6 +15,7 @@ import httpx
 import pytest
 from starlette.testclient import TestClient
 
+from hrms_mcp import jira as jira_module
 from hrms_mcp.app import create_app
 from hrms_mcp.config import Settings
 from hrms_mcp.jira import Jira, project_keys, ticket_of
@@ -118,7 +119,27 @@ def test_a_manager_is_shown_the_applicants_open_tickets_or_told_there_are_none()
     assert their_work(work, "Anu", FRI, FRI) == (
         "Anu has 1 open Jira ticket in ECP: ECP-7 Task ECP-7 (In Progress)."
     )
-    assert their_work(work, "Priya", FRI, FRI) == "Priya has no open Jira tickets in ECP."
+    assert their_work(work, "Priya", FRI, FRI, account="acc-priya") == (
+        "Priya has no open Jira tickets in ECP."
+    )
+
+
+def test_none_is_not_said_when_their_jira_account_is_unknown() -> None:
+    work = [ProjectWork("PAY", open_tickets=[_t("PAY-3", "navaneeth", "indeterminate")])]
+    said = their_work(work, "Navaneeth K", FRI, FRI)
+    assert "has no open" not in said
+    assert said.startswith("No open Jira tickets in PAY were found for Navaneeth K.")
+    assert "account could not be confirmed" in said
+
+
+def test_none_is_not_said_when_not_every_open_ticket_was_read() -> None:
+    work = [ProjectWork("ECP", open_tickets=[_t("ECP-8", "Ravi")], complete=False)]
+    said = their_work(work, "Anu", FRI, FRI, account="acc-anu")
+    assert "has no open" not in said
+    assert "only some of the open tickets in ECP could be read" in said
+    found = [ProjectWork("ECP", open_tickets=[_t("ECP-7", "Anu")], complete=False)]
+    assert their_work(found, "Anu", FRI, FRI).startswith("Anu has 1 open Jira ticket in ECP")
+    assert "may not be listed" in their_work(found, "Anu", FRI, FRI)
 
 
 def test_a_manager_is_shown_up_to_ten_of_them() -> None:
@@ -235,6 +256,18 @@ def test_every_page_of_open_work_and_the_sprint_is_read() -> None:
     (work,) = asyncio.run(Jira(_settings(), httpx.MockTransport(fake.handler)).work(["ECP"]))
     assert [t.key for t in work.open_tickets] == ["ECP-1", "ECP-2"]
     assert work.sprint is not None and len(work.sprint.tickets) == 10
+
+
+def test_open_work_cut_off_at_the_limit_is_incomplete(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(jira_module, "_LIMIT", 1)
+    fake = FakeJira()
+    fake.paged = True
+    (work,) = asyncio.run(Jira(_settings(), httpx.MockTransport(fake.handler)).work(["ECP"]))
+    assert [t.key for t in work.open_tickets] == ["ECP-1"]
+    assert work.complete is False
+    monkeypatch.setattr(jira_module, "_LIMIT", 1000)
+    (work,) = asyncio.run(Jira(_settings(), httpx.MockTransport(fake.handler)).work(["ECP"]))
+    assert work.complete is True
 
 
 def test_a_jira_that_refuses_is_skipped_not_failed() -> None:
