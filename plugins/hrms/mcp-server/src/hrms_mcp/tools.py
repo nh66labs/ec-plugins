@@ -176,6 +176,51 @@ def warning_of(sentences: list[str]) -> str:
     return f"Heads-up: {' '.join(said)} Do you still want to apply?" if said else ""
 
 
+def _number(value: Any) -> bool:
+    """An int or float from the HRMS — never a bool, which Python counts as one."""
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def _days(n: float) -> str:
+    """``1`` → "1 day"; ``0.5`` → "half a day"; ``2.5`` → "2.5 days"."""
+    return "half a day" if n == 0.5 else f"{n:g} day{'' if n == 1 else 's'}"
+
+
+def request_line(
+    leave_type: str, date_from: str, date_to: str, day_portion: str, days: Any
+) -> str:
+    """The request as one sentence: "Casual leave on Fri 9 Oct 2026, full day — 1 day."."""
+    when = when_of(date_from, date_to)
+    on = "from" if " to " in when else "on"
+    counts = f" — {_days(days)}" if _number(days) else ""
+    return f"{kind_of(leave_type)} {on} {when}, {portion_of(day_portion)}{counts}."
+
+
+def balance_sentence(balance: Any) -> tuple[str, bool]:
+    """What the request leaves of the balance, from the HRMS's ``facts.balance``,
+    and whether it needs more than is left — a reason to think twice, said in
+    the Heads-up. Empty when it gave none, and the HRMS's own line is shown instead."""
+    if not isinstance(balance, dict):
+        return "", False
+    left, needs = balance.get("available"), balance.get("requested")
+    if not _number(left) or not _number(needs):
+        return "", False
+    kind = kind_of(str(balance.get("leave_type") or "")).lower()
+    after = left - needs
+    if left <= 0:
+        return f"You have no {kind} days left, and this needs {_days(needs)}.", True
+    have = f"You have {left:g} {kind} day{'' if left == 1 else 's'} left"
+    if after < 0:
+        return f"{have}, and this needs {_days(needs)} — {_days(-after)} more than you have.", True
+    return f"{have} — {after:g} after this one.", False
+
+
+# The HRMS's balance line when it says no more than facts.balance does.
+_PLAIN_BALANCE = re.compile(
+    r"Balance: [\d.]+ [\w ]+ day\(s\) available; this request uses [\d.]+\.?"
+)
+
+
 def _briefing_lines(briefing: Any, *, said: str = "") -> list[str]:
     """The HRMS's own briefing — a list of lines, or text — without its team line,
     which the warning above already says, nor a Jira line whose every ticket this
@@ -363,7 +408,7 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
                 )
                 + "."
             )
-        lines.append(await _approvers(hrms, ctx))
+        lines.append(await _approvers(hrms, ctx, ask=False))
         lines.append(
             "Leave types: Casual Leave, Sick Leave, Floating Leave. "
             "Day portions: Full Day, First Half, Second Half."
@@ -377,11 +422,13 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
         day_portion: DayPortion,
         ctx: Context,
         date_to: str = "",
+        approver: str = "",
     ) -> str:
         """Check a leave request before filing it, creating nothing: how many days
         it counts as, clashes with meetings or teammates' leave, and the balance
         left. Dates are YYYY-MM-DD; date_to defaults to date_from. Call this
-        before apply_leave with the same details."""
+        before apply_leave with the same details, approver included if one was
+        chosen. The answer is written to the person asking."""
         result = await _ask(
             hrms,
             ctx,
@@ -395,27 +442,35 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
         )
         if not isinstance(result, dict):
             return str(result)
-        days = result.get("effective_days")
-        counts = (
-            f": counts as {days:g} day{'s' if days != 1 else ''}."
-            if isinstance(days, int | float)
-            else "."
-        )
-        head = (
-            f"{kind_of(leave_type)}, {when_of(date_from, date_to or date_from)}, "
-            f"{portion_of(day_portion)}{counts}"
-        )
         until = date_to or date_from
+        head = request_line(
+            leave_type, date_from, until, day_portion, result.get("effective_days")
+        )
+        balance, short = balance_sentence((result.get("facts") or {}).get("balance"))
         off = teammates_off(result)
-        from_jira = await jira_sentences(hrms, jira, ctx, off, date_from, until)
+        # Independent of each other: side by side, the check waits for the slower only.
+        from_jira, approvers = await asyncio.gather(
+            jira_sentences(hrms, jira, ctx, off, date_from, until),
+            _approvers(hrms, ctx, approver),
+        )
         jira_warnings, jira_note = from_jira or ([], "")
-        warning = warning_of([teammates_sentence(off, date_from, until), *jira_warnings])
+        warning = warning_of(
+            [teammates_sentence(off, date_from, until), *jira_warnings, balance if short else ""]
+        )
         parts = [warning, head] if warning else [head]
+        if balance and not short:
+            parts.append(balance)
         if jira_note:
             parts.append(jira_note)
-        parts.extend(_briefing_lines(result.get("briefing"), said="\n".join(parts)))
-        parts.append(await _approvers(hrms, ctx))
-        parts.append("Nothing has been filed.")
+        parts.extend(
+            line
+            for line in _briefing_lines(result.get("briefing"), said="\n".join(parts))
+            # Said above in the person's words; the HRMS's own line only without it,
+            # or when it says more — that the excess is unpaid, say.
+            if not (balance and _PLAIN_BALANCE.fullmatch(line))
+        )
+        parts.append(approvers)
+        parts.append("Nothing is filed until you confirm.")
         return "\n".join(parts)
 
     @server.tool(annotations=READ_ONLY, structured_output=False)
@@ -626,18 +681,31 @@ async def _holidays_ahead(hrms: Hrms, ctx: Context, today: str, days: int = 31) 
     return "Holidays in the next month: " + ("; ".join(found) if found else "none") + "."
 
 
-async def _approvers(hrms: Hrms, ctx: Context) -> str:
-    """Who approves the asker's leave, said so the assistant asks only when it must."""
+async def _approvers(hrms: Hrms, ctx: Context, approver: str = "", *, ask: bool = True) -> str:
+    """Who approves the asker's leave, said to the asker — the one chosen, if a
+    name means one of theirs; otherwise all of them, asking which (``ask``) only
+    when there are several."""
     result = await _ask(hrms, ctx, "get_employee_project_managers", {})
-    managers = [m.get("name", "") for m in (result or {}).get("project_managers", [])]
+    found = (result or {}).get("project_managers", [])
+    chosen = manager_named(found, approver) if approver.strip() else None
+    if chosen is not None and chosen.get("name"):
+        return f"{chosen['name']} will approve it."
+    managers = [m.get("name", "") for m in found]
+    listed = f"{', '.join(managers[:-1])} and {managers[-1]}" if managers else "none"
+    if approver.strip():
+        # apply_leave refuses a name that is not exactly one of them; say so now,
+        # not after the Confirm.
+        return (
+            f"{approver.strip()} does not name exactly one of your project managers "
+            f"({listed}), so this cannot be filed as it is — choose one of them."
+        )
     if not managers:
-        return "No project manager is recorded for them; the HRMS routes the request itself."
+        return "You have no project manager on record, so the HRMS will pick the approver."
     if len(managers) == 1:
-        return f"Approver: {managers[0]}."
-    return (
-        f"They have {len(managers)} project managers: {', '.join(managers)}. Ask which one "
-        "should approve, and pass that name as approver when applying."
-    )
+        return f"{managers[0]} will approve it."
+    if not ask:
+        return f"You have {len(managers)} project managers: {listed}."
+    return f"You have {len(managers)} project managers, {listed} — which of them should approve it?"
 
 
 async def describe_request(hrms: Hrms, ctx: Context, item: dict[str, Any]) -> str:

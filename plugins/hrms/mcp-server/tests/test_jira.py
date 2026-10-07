@@ -481,7 +481,7 @@ def test_the_check_warns_once_with_the_teammate_the_sprint_and_the_persons_ticke
         "sprint “Sprint 14” ends Mon 5 Oct, the day you're back). Do you still want to apply?"
     )
     assert "Jira: Ticket" not in said, "said once, in the warning"
-    assert "Balance: 10.0" in said and "Nothing has been filed." in said
+    assert "Balance: 10.0" in said and "Nothing is filed until you confirm." in said
 
 
 def test_a_jira_that_does_not_answer_leaves_the_hrms_check_as_it_was(
@@ -656,5 +656,5 @@ def test_open_tickets_the_leave_does_not_touch_are_a_plain_line_not_a_warning(
     said = _preview(client)
     warning, head, note = said.splitlines()[:3]
     assert "Jira ticket" not in warning
-    assert head.startswith("Casual leave, Fri 2 Oct 2026")
+    assert head.startswith("Casual leave on Fri 2 Oct 2026")
     assert note == "Your 1 open Jira ticket is not due around your leave."
