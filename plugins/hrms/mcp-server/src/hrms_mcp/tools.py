@@ -144,9 +144,14 @@ def portion_of(value: str) -> str:
     return " ".join(str(value or "").replace("_", " ").split()).lower()
 
 
+def _and(names: list[str]) -> str:
+    """``[A]`` → "A"; ``[A, B]`` → "A and B"; ``[A, B, C]`` → "A, B and C"."""
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+
+
 def _names(names: list[str]) -> str:
     """``[A]`` → "A"; ``[A, B]`` → "A and B"; three or more → "3 teammates (A, B and C)"."""
-    listed = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+    listed = _and(names)
     return listed if len(names) < 3 else f"{len(names)} teammates ({listed})"
 
 
@@ -208,17 +213,30 @@ def balance_sentence(balance: Any) -> tuple[str, bool]:
     kind = kind_of(str(balance.get("leave_type") or "")).lower()
     after = left - needs
     if left <= 0:
-        return f"You have no {kind} days left, and this needs {_days(needs)}.", True
-    have = f"You have {left:g} {kind} day{'' if left == 1 else 's'} left"
+        return f"You have no {kind} left, and this needs {_days(needs)}.", True
+    have = f"You have {_days(left)} of {kind} left"
     if after < 0:
         return f"{have}, and this needs {_days(needs)} — {_days(-after)} more than you have.", True
-    return f"{have} — {after:g} after this one.", False
+    return f"{have} — {_days(after)} after this one.", False
 
 
-# The HRMS's balance line when it says no more than facts.balance does.
-_PLAIN_BALANCE = re.compile(
-    r"Balance: [\d.]+ [\w ]+ day\(s\) available; this request uses [\d.]+\.?"
+# What the HRMS's balance line may say that facts.balance already does; a line
+# saying anything else — that the excess is unpaid, say — is kept.
+_BALANCE_CLAUSES = (
+    re.compile(r"[\d.]+ [^;]*\bavailable", re.IGNORECASE),
+    re.compile(r"this request uses [\d.]+(?: days?| day\(s\))?", re.IGNORECASE),
 )
+
+
+def _plain_balance(line: str) -> bool:
+    """Whether an HRMS "Balance:" line says only what is available and what the
+    request uses, however it words the leave type or the days."""
+    if not line.startswith("Balance:"):
+        return False
+    clauses = line.removeprefix("Balance:").strip().rstrip(".").split(";")
+    return all(
+        any(c.fullmatch(clause.strip()) for c in _BALANCE_CLAUSES) for clause in clauses
+    )
 
 
 def _briefing_lines(briefing: Any, *, said: str = "") -> list[str]:
@@ -408,7 +426,7 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
                 )
                 + "."
             )
-        lines.append(await _approvers(hrms, ctx, ask=False))
+        lines.append(await _approvers(hrms, ctx))
         lines.append(
             "Leave types: Casual Leave, Sick Leave, Floating Leave. "
             "Day portions: Full Day, First Half, Second Half."
@@ -428,7 +446,9 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
         it counts as, clashes with meetings or teammates' leave, and the balance
         left. Dates are YYYY-MM-DD; date_to defaults to date_from. Call this
         before apply_leave with the same details, approver included if one was
-        chosen. The answer is written to the person asking."""
+        chosen. The answer is written to the person asking. When it says no
+        approver was chosen, or the name given is not one of theirs, call
+        start_leave_request so they choose — do not ask them yourself."""
         result = await _ask(
             hrms,
             ctx,
@@ -449,15 +469,21 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
         balance, short = balance_sentence((result.get("facts") or {}).get("balance"))
         off = teammates_off(result)
         # Independent of each other: side by side, the check waits for the slower only.
-        from_jira, approvers = await asyncio.gather(
-            jira_sentences(hrms, jira, ctx, off, date_from, until),
-            _approvers(hrms, ctx, approver),
+        # The Jira read is cancelled if the managers' lookup fails, not left running.
+        reading = asyncio.ensure_future(
+            jira_sentences(hrms, jira, ctx, off, date_from, until)
         )
-        jira_warnings, jira_note = from_jira or ([], "")
+        try:
+            approvers, blocked = await _approver_of(hrms, ctx, approver)
+        except BaseException:
+            reading.cancel()
+            raise
+        jira_warnings, jira_note = await reading or ([], "")
         warning = warning_of(
             [teammates_sentence(off, date_from, until), *jira_warnings, balance if short else ""]
         )
-        parts = [warning, head] if warning else [head]
+        # What stops it being filed comes first, before any reason to think twice.
+        parts = [p for p in (approvers if blocked else "", warning, head) if p]
         if balance and not short:
             parts.append(balance)
         if jira_note:
@@ -467,10 +493,13 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
             for line in _briefing_lines(result.get("briefing"), said="\n".join(parts))
             # Said above in the person's words; the HRMS's own line only without it,
             # or when it says more — that the excess is unpaid, say.
-            if not (balance and _PLAIN_BALANCE.fullmatch(line))
+            if not (balance and _plain_balance(line))
         )
-        parts.append(approvers)
-        parts.append("Nothing is filed until you confirm.")
+        if blocked:
+            parts.append("Nothing can be filed until one of them is chosen.")
+        else:
+            parts.append(approvers)
+            parts.append("Nothing is filed until you confirm.")
         return "\n".join(parts)
 
     @server.tool(annotations=READ_ONLY, structured_output=False)
@@ -681,31 +710,50 @@ async def _holidays_ahead(hrms: Hrms, ctx: Context, today: str, days: int = 31) 
     return "Holidays in the next month: " + ("; ".join(found) if found else "none") + "."
 
 
-async def _approvers(hrms: Hrms, ctx: Context, approver: str = "", *, ask: bool = True) -> str:
-    """Who approves the asker's leave, said to the asker — the one chosen, if a
-    name means one of theirs; otherwise all of them, asking which (``ask``) only
-    when there are several."""
+async def _approvers(hrms: Hrms, ctx: Context) -> str:
+    """Who approves the asker's leave, said to the asker: the one, or all of them."""
     result = await _ask(hrms, ctx, "get_employee_project_managers", {})
     found = (result or {}).get("project_managers", [])
-    chosen = manager_named(found, approver) if approver.strip() else None
-    if chosen is not None and chosen.get("name"):
-        return f"{chosen['name']} will approve it."
-    managers = [m.get("name", "") for m in found]
-    listed = f"{', '.join(managers[:-1])} and {managers[-1]}" if managers else "none"
+    if not found:
+        return "You have no project manager on record, so the HRMS will pick the approver."
+    if len(found) == 1:
+        return f"{_name_of(found[0], 'Your project manager')} will approve it."
+    return f"You have {len(found)} project managers: {_and(_manager_names(found))}."
+
+
+def _name_of(manager: dict[str, Any], blank: str) -> str:
+    """A manager's name, or ``blank`` when the HRMS left it empty."""
+    return str(manager.get("name") or "").strip() or blank
+
+
+def _manager_names(found: list[dict[str, Any]]) -> list[str]:
+    """Their names, as listed to the asker — one the HRMS left blank still counts."""
+    return [_name_of(m, "one with no name") for m in found]
+
+
+async def _approver_of(hrms: Hrms, ctx: Context, approver: str) -> tuple[str, bool]:
+    """Who will approve this request, said to the asker, and whether apply_leave
+    would refuse it as it is — a name that is not exactly one of their managers,
+    or none with several to choose from. Decided as apply_leave decides, so the
+    check never promises what the filing refuses."""
+    result = await _ask(hrms, ctx, "get_employee_project_managers", {})
+    found = (result or {}).get("project_managers", [])
+    managers = _manager_names(found)
+    listed = _and(managers) if managers else "none"
     if approver.strip():
-        # apply_leave refuses a name that is not exactly one of them; say so now,
-        # not after the Confirm.
+        chosen = manager_named(found, approver)
+        if chosen is not None:
+            return f"{_name_of(chosen, approver.strip())} will approve it.", False
         return (
             f"{approver.strip()} does not name exactly one of your project managers "
-            f"({listed}), so this cannot be filed as it is — choose one of them."
+            f"({listed}).",
+            True,
         )
     if not managers:
-        return "You have no project manager on record, so the HRMS will pick the approver."
+        return "You have no project manager on record, so the HRMS will pick the approver.", False
     if len(managers) == 1:
-        return f"{managers[0]} will approve it."
-    if not ask:
-        return f"You have {len(managers)} project managers: {listed}."
-    return f"You have {len(managers)} project managers, {listed} — which of them should approve it?"
+        return f"{_name_of(found[0], 'Your project manager')} will approve it.", False
+    return f"You have {len(managers)} project managers, {listed}, and none was chosen.", True
 
 
 async def describe_request(hrms: Hrms, ctx: Context, item: dict[str, Any]) -> str:

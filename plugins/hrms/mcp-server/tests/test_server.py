@@ -448,13 +448,36 @@ def test_the_check_speaks_to_the_person_in_plain_sentences(
         "facts": {"balance": {"leave_type": "Casual Leave", "available": 5.0, "requested": 1.0}},
         "briefing": ["Balance: 5.0 Casual Leave day(s) available; this request uses 1.0."],
     }
-    assert _check(client).splitlines() == [
+    assert _check(client, approver="Abhijith").splitlines() == [
         "Casual leave on Fri 9 Oct 2026, full day — 1 day.",
-        "You have 5 casual leave days left — 4 after this one.",
-        "You have 2 project managers, Abhijith K K and Muhammed Nizar K — "
-        "which of them should approve it?",
+        "You have 5 days of casual leave left — 4 days after this one.",
+        "Abhijith K K will approve it.",
         "Nothing is filed until you confirm.",
     ]
+
+
+def test_the_check_says_first_that_no_approver_was_chosen(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    _two_managers(hrms)
+    said = _check(client).splitlines()
+    assert said[0] == (
+        "You have 2 project managers, Abhijith K K and Muhammed Nizar K, and none was chosen."
+    )
+    assert said[-1] == "Nothing can be filed until one of them is chosen."
+    assert "Nothing is filed until you confirm." not in said
+    assert not any("?" in line for line in said)  # never a question about managers
+
+
+def test_the_hrms_balance_line_goes_however_it_words_the_same(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    hrms.results["preview_leave"] = {
+        "effective_days": 1,
+        "facts": {"balance": {"leave_type": "Casual Leave", "available": 5.0, "requested": 1.0}},
+        "briefing": ["Balance: 5 Work-from-home days available; this request uses 1 day."],
+    }
+    assert "Balance:" not in _check(client)
 
 
 def test_the_check_names_the_approver_already_chosen(client: TestClient, hrms: FakeHrms) -> None:
@@ -477,7 +500,7 @@ def test_the_check_words_half_days_ranges_and_a_short_balance(
         "day_portion": "First Half",
     }))
     assert said.startswith(
-        "Heads-up: You have no sick leave days left, and this needs half a day. "
+        "Heads-up: You have no sick leave left, and this needs half a day. "
         "Do you still want to apply?\n"
         "Sick leave from Mon 5 Oct 2026 to Tue 6 Oct 2026, first half — half a day."
     )
@@ -489,9 +512,11 @@ def test_a_balance_short_by_some_says_by_how_much(client: TestClient, hrms: Fake
         "facts": {"balance": {"leave_type": "Casual Leave", "available": 1.0, "requested": 3.0}},
     }
     assert _check(client).startswith(
-        "Heads-up: You have 1 casual leave day left, and this needs 3 days — "
+        "Heads-up: You have 1 day of casual leave left, and this needs 3 days — "
         "2 days more than you have. Do you still want to apply?"
     )
+    hrms.results["preview_leave"]["facts"]["balance"]["available"] = 0.5
+    assert "You have half a day of casual leave left" in _check(client)
 
 
 def test_the_hrms_balance_line_stays_when_it_says_more(
@@ -514,7 +539,7 @@ def test_a_boolean_from_the_hrms_is_not_a_number(client: TestClient, hrms: FakeH
     }
     said = _check(client)
     assert said.startswith("Casual leave on Fri 9 Oct 2026, full day.")
-    assert "day left" not in said
+    assert "left" not in said
 
 
 def test_the_check_says_when_the_approver_is_not_one_of_theirs(
@@ -522,12 +547,26 @@ def test_the_check_says_when_the_approver_is_not_one_of_theirs(
 ) -> None:
     _two_managers(hrms)
     for name in ("Maya", "K"):  # none of them; both of them
-        said = _check(client, approver=name)
-        assert (
+        said = _check(client, approver=name).splitlines()
+        assert said[0] == (
             f"{name} does not name exactly one of your project managers "
-            "(Abhijith K K and Muhammed Nizar K), so this cannot be filed as it is"
-        ) in said
-        assert "which of them" not in said
+            "(Abhijith K K and Muhammed Nizar K)."
+        )
+        assert said[-1] == "Nothing can be filed until one of them is chosen."
+    hrms.results["get_employee_project_managers"] = {
+        "count": 1, "project_managers": [{"id": "a", "name": "Alice"}],
+    }
+    said = _check(client, approver="Bob")
+    assert "Bob does not name exactly one of your project managers (Alice)." in said
+
+
+def test_a_manager_with_no_name_still_approves(client: TestClient, hrms: FakeHrms) -> None:
+    hrms.results["get_employee_project_managers"] = {
+        "count": 1, "project_managers": [{"id": "a", "name": ""}],
+    }
+    said = _check(client)
+    assert "Your project manager will approve it." in said
+    assert "Nothing is filed until you confirm." in said
 
 
 def test_no_teammate_off_means_no_warning(client: TestClient, hrms: FakeHrms) -> None:
@@ -589,7 +628,7 @@ def test_the_named_approver_is_sent_by_id(client: TestClient, hrms: FakeHrms) ->
     [filed] = [c for c in hrms.calls() if c["name"] == "apply_leave"]
     assert filed["arguments"]["project_manager_id"] == "b"
     refused = call(client, "apply_leave", {**APPLY, "approver": "Maya"})
-    assert refused["isError"] is True and "is not one of your project managers" in text(refused)
+    assert refused["isError"] is True and "does not name exactly one" in text(refused)
 
 
 def test_several_managers_and_no_approver_files_nothing(

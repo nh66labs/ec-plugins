@@ -159,9 +159,9 @@ def register(server: MCPServer, hrms: Hrms) -> None:
             if chosen is None:
                 names = ", ".join(m.get("name", "") for m in managers) or "none"
                 raise ToolError(
-                    f"{approver} is not one of your project managers ({names}). Pass one "
-                    "of them as approver, or call start_leave_request so the person "
-                    "chooses — do not ask them yourself."
+                    f"{approver} does not name exactly one of your project managers "
+                    f"({names}). Pass one of them as approver, or call start_leave_request "
+                    "so the person chooses — do not ask them yourself."
                 )
             arguments["project_manager_id"] = chosen["id"]
         elif len(managers) == 1:
