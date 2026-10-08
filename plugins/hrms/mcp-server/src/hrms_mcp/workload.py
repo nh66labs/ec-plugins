@@ -240,7 +240,7 @@ def _placed(
     ))
 
 
-def _and(items: list[str]) -> str:
+def joined(items: list[str]) -> str:
     """``[A]`` → "A"; ``[A, B]`` → "A and B"; ``[A, B, C]`` → "A, B and C"."""
     return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} and {items[-1]}"
 
@@ -250,7 +250,7 @@ def _named(placed: list[_Placed], limit: int, more: str = "more") -> str:
     rest = len(placed) - len(shown)
     if rest:
         shown.append(f"{rest} {more}")
-    return _and(shown)
+    return joined(shown)
 
 
 def _touched(
@@ -374,7 +374,7 @@ def own_heads_up(
             items = [short(t, room) for t in named[:shown]]
             if len(named) > shown:
                 items.append(f"{len(named) - shown} more")
-            said = f"{lead}: {_and(items)}. {close}"
+            said = f"{lead}: {joined(items)}. {close}"
             if len(said) <= limit:
                 return said
     return next((said for said in (f"{lead}. {close}", f"{lead}.") if len(said) <= limit), "")

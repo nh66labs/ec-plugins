@@ -173,7 +173,7 @@ class Jira:
             complete=complete,
         )
 
-    async def account_of(self, email: str) -> str:
+    async def account_of(self, email: str, *, reuse: bool = False) -> str:
         """The Jira account a work email belongs to, or "" when Jira does not say.
 
         Jira finds a person by their email even when it hides that email on
@@ -181,10 +181,12 @@ class Jira:
         Only the one person whose email Jira shows as exactly this counts. Jira's
         search matches prefixes, so a match showing another email — or hiding
         its email, which may be nav@acme.com.au for nav@acme.com — may be
-        someone else; they are then found by name instead."""
+        someone else; they are then found by name instead. With ``reuse``, an
+        account found in the last ``FRESH_SECONDS`` is given again; one not
+        found is always asked again."""
         if not email:
             return ""
-        if (known := self._recall(("account", email.casefold()))) is not None:
+        if reuse and (known := self._recall(("account", email.casefold()))):
             return known
         try:
             async with self._client() as http:
@@ -200,7 +202,8 @@ class Jira:
             u for u in people if str(u.get("emailAddress") or "").casefold() == email.casefold()
         ]
         account = str(exact[0]["accountId"]) if len(exact) == 1 else ""
-        self._keep(("account", email.casefold()), account)
+        if account:
+            self._keep(("account", email.casefold()), account)
         return account
 
     async def work(self, keys: list[str], *, reuse: bool = False) -> list[ProjectWork]:

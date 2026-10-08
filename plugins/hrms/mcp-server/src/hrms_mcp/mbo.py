@@ -95,8 +95,8 @@ def period_dates(plan: dict[str, Any]) -> tuple[date, date] | None:
             pass
     try:
         year = int(str(plan.get("fiscal_year", "")).split("-")[0])
-        (sm, sd), (em, ed), next_year = QUARTER_WINDOWS[int(plan.get("quarter", 0))]
-    except (ValueError, KeyError):
+        (sm, sd), (em, ed), next_year = QUARTER_WINDOWS[int(plan.get("quarter") or 0)]
+    except (ValueError, KeyError, TypeError):
         return None
     start_year = year + (1 if sm < 4 else 0)
     end_year = year + (1 if next_year or em < 4 else 0)
@@ -228,15 +228,25 @@ def work_lines(entries: Any, since: date) -> list[str]:
     return lines
 
 
-def open_plan(*plans: Any) -> dict[str, Any] | None:
-    """The first plan MBOs can be saved to — this quarter's, else next's."""
-    return next((p for p in plans if isinstance(p, dict) and p.get("can_edit")), None)
+def open_plans(*plans: Any) -> list[dict[str, Any]]:
+    """The plans MBOs can be saved to, this quarter's before next's."""
+    return [p for p in plans if isinstance(p, dict) and p.get("can_edit")]
 
 
-def presentation_lines(plan: dict[str, Any] | None, today: date) -> list[str]:
+def _plan_named(plan: dict[str, Any]) -> str:
+    """``fiscal_year "2026-27", quarter 3`` — what save_my_mbo_plan is given."""
+    return f"fiscal_year \"{plan.get('fiscal_year')}\", quarter {plan.get('quarter')}"
+
+
+def presentation_lines(
+    plan: dict[str, Any] | None, today: date, *, other: dict[str, Any] | None = None
+) -> list[str]:
     """How the suggestions are laid out for the person, with the open plan's
     dates in the KPI line, a warning when its period is over or nearly so, and
     which plan a save goes to — or, with no plan open, that none can be made.
+    ``other`` is next quarter's plan when it is open too: the person may name
+    either, so each one's dates and save target are given, this quarter's
+    being the one worked on unless they name next.
 
     Here rather than in ``INSTRUCTIONS``: they did not fit in what the platform
     keeps of those, and here they are read only on the turns that set MBOs, right
@@ -244,12 +254,21 @@ def presentation_lines(plan: dict[str, Any] | None, today: date) -> list[str]:
     table arrives as raw pipes and a list of sources pushes the MBOs off screen.
     """
     dates = period_dates(plan) if plan else None
-    kpi = "a number or a date" + (
-        f" between {dates[0]:%d %b %Y} and {dates[1]:%d %b %Y}" if dates else ""
-    )
+    later = period_dates(other) if plan and other else None
+    if dates and later:
+        kpi = (
+            "a number or a date within the quarter worked on (this quarter: "
+            f"{dates[0]:%d %b %Y} to {dates[1]:%d %b %Y}; next: "
+            f"{later[0]:%d %b %Y} to {later[1]:%d %b %Y})"
+        )
+    else:
+        kpi = "a number or a date" + (
+            f" between {dates[0]:%d %b %Y} and {dates[1]:%d %b %Y}" if dates else ""
+        )
     late: list[str] = []
+    its = "If working on this quarter: its" if other else "Its"
     if dates and dates[1] < today:
-        late = [f"- Its period ended on {dates[1]:%d %b %Y}: say so before suggesting."]
+        late = [f"- {its} period ended on {dates[1]:%d %b %Y}: say so before suggesting."]
     elif dates and (dates[1] - today).days <= NEARLY_OVER_DAYS:
         left = (dates[1] - today).days
         when = (
@@ -257,13 +276,20 @@ def presentation_lines(plan: dict[str, Any] | None, today: date) -> list[str]:
             else f"on {dates[1]:%d %b %Y}, {left} day{'s' if left != 1 else ''} from now"
         )
         late = [
-            f"- Its period ends {when}: say so before suggesting, and keep targets to what fits."
+            f"- {its} period ends {when}: say so before suggesting, and keep targets to what"
+            " fits."
         ]
+    if plan and other:
+        target = (
+            f" (this quarter's: {_plan_named(plan)}; next quarter's, if they named it:"
+            f" {_plan_named(other)})."
+        )
+    elif plan:
+        target = f" (the open one: {_plan_named(plan)})."
     if plan:
         close = [
             "- Once they agree a set, show the whole set, then call save_my_mbo_plan with the"
-            " fiscal year and quarter of the plan worked on (the open one: fiscal_year"
-            f" \"{plan.get('fiscal_year')}\", quarter {plan.get('quarter')}).",
+            " fiscal year and quarter of the plan worked on" + target,
             "- End by asking whether to refine them (and what they want to grow in) or save"
             " them as a Draft. Do not save yet.",
         ]
@@ -340,7 +366,11 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         current = await _ask(hrms, ctx, "get_my_mbo_plan", {})
         lines = profile_lines(profile) + [""] + plan_lines(current, "This quarter's plan")
         upcoming: Any = None
-        if isinstance(current, dict) and current.get("fiscal_year"):
+        if (
+            isinstance(current, dict)
+            and current.get("fiscal_year")
+            and str(current.get("quarter") or "").isdigit()
+        ):
             fiscal_year, quarter = previous_quarter(
                 str(current["fiscal_year"]), int(current["quarter"])
             )
@@ -362,7 +392,10 @@ def register(server: MCPServer, hrms: Hrms) -> None:
             {"start_date": since.isoformat(), "end_date": _today(session).isoformat()},
         )
         lines += [""] + work_lines(entries, since)
-        lines += [""] + presentation_lines(open_plan(current, upcoming), _today(session))
+        plan, *other = open_plans(current, upcoming) or [None]
+        lines += [""] + presentation_lines(
+            plan, _today(session), other=other[0] if other else None
+        )
         return "\n".join(lines)
 
     @server.tool(annotations=READ_ONLY, structured_output=False)

@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from collections.abc import Callable
 from datetime import date
 from typing import Any, Literal
 
@@ -144,12 +145,9 @@ def portion_of(value: str) -> str:
     return " ".join(str(value or "").replace("_", " ").split()).lower()
 
 
-_and = workload._and
-
-
 def _names(names: list[str]) -> str:
     """``[A]`` → "A"; ``[A, B]`` → "A and B"; three or more → "3 teammates (A, B and C)"."""
-    listed = _and(names)
+    listed = workload.joined(names)
     return listed if len(names) < 3 else f"{len(names)} teammates ({listed})"
 
 
@@ -274,34 +272,41 @@ async def _own_jira(
     email = str(session.get("company_email") or "")
     work, account = await asyncio.gather(
         jira.work(project_keys(jira.settings, names), reuse=reuse),
-        jira.account_of(email),
+        jira.account_of(email, reuse=reuse),
     )
     if not work:
         return None
     return work, session, email, account, start, end
 
 
+#: Says the heads-up in at most the characters given ("" when it does not fit).
+HeadsUp = Callable[[int], str]
+
+
 async def own_heads_up(
-    hrms: Hrms, jira: Jira | None, ctx: Context, date_from: str, date_to: str, *, limit: int
-) -> str:
+    hrms: Hrms, jira: Jira | None, ctx: Context, date_from: str, date_to: str
+) -> HeadsUp | None:
     """The asker's own tickets these dates touch, as one short sentence for the
-    moment they name them (``workload.own_heads_up``); empty when none, or when
-    Jira was not read. A recent answer from Jira will do: the check before
-    Confirm reads it again."""
+    moment they name them (``workload.own_heads_up``), sized once the room for
+    it is known; None when Jira was not read. A recent answer from Jira will
+    do: the check before Confirm reads it again."""
     if jira is None or not jira.configured:
-        return ""
+        return None
     read = await _own_jira(hrms, jira, ctx, date_from, date_to, reuse=True)
     if read is None:
-        return ""
+        return None
     work, session, email, account, start, end = read
     settings = jira.settings
-    return workload.own_heads_up(
-        work, str(session.get("name") or ""), email, start, end, account=account,
-        today=_today(session),
-        after_days=settings.jira_after_leave_days,
-        soon_days=settings.jira_leave_soon_days,
-        limit=limit,
-    )
+    def say(limit: int) -> str:
+        return workload.own_heads_up(
+            work, str(session.get("name") or ""), email, start, end, account=account,
+            today=_today(session),
+            after_days=settings.jira_after_leave_days,
+            soon_days=settings.jira_leave_soon_days,
+            limit=limit,
+        )
+
+    return say
 
 
 async def jira_sentences(
@@ -761,7 +766,7 @@ async def _approvers(hrms: Hrms, ctx: Context) -> str:
         return "You have no project manager on record, so the HRMS will pick the approver."
     if len(found) == 1:
         return f"{_name_of(found[0], 'Your project manager')} will approve it."
-    return f"You have {len(found)} project managers: {_and(_manager_names(found))}."
+    return f"You have {len(found)} project managers: {workload.joined(_manager_names(found))}."
 
 
 def _name_of(manager: dict[str, Any], blank: str) -> str:
@@ -782,7 +787,7 @@ async def _approver_of(hrms: Hrms, ctx: Context, approver: str) -> tuple[str, bo
     result = await _ask(hrms, ctx, "get_employee_project_managers", {})
     found = (result or {}).get("project_managers", [])
     managers = _manager_names(found)
-    listed = _and(managers) if managers else "none"
+    listed = workload.joined(managers) if managers else "none"
     if approver.strip():
         chosen = manager_named(found, approver)
         if chosen is not None:

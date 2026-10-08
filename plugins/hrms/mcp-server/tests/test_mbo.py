@@ -350,6 +350,21 @@ def test_the_coaching_warns_when_the_period_is_nearly_over_or_over() -> None:
     )
 
 
+def test_with_both_quarters_open_the_coaching_gives_each_ones_dates_and_save() -> None:
+    this = {"fiscal_year": "2026-27", "quarter": 3, "can_edit": True}
+    following = {"fiscal_year": "2026-27", "quarter": 4, "can_edit": True}
+    said = "\n".join(mbo.presentation_lines(this, date(2026, 12, 12), other=following))
+    assert "this quarter: 16 Sep 2026 to 15 Dec 2026; next: 16 Dec 2026 to 15 Mar 2027" in said
+    assert 'next quarter\'s, if they named it: fiscal_year "2026-27", quarter 4' in said
+    assert "- If working on this quarter: its period ends on 15 Dec 2026" in said
+
+
+def test_a_plan_without_a_quarter_still_gives_the_coaching() -> None:
+    plan = {"fiscal_year": "2026-27", "quarter": None, "can_edit": True}
+    assert mbo.period_dates(plan) is None
+    assert "  *KPI* — a number or a date" in mbo.presentation_lines(plan, date(2026, 9, 20))
+
+
 def test_with_no_plan_open_the_coaching_offers_no_save() -> None:
     said = "\n".join(mbo.presentation_lines(None, date(2026, 9, 20)))
     assert "nothing can be saved until HR opens one" in said

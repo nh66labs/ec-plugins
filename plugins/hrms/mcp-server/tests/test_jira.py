@@ -477,7 +477,8 @@ def test_an_account_is_found_by_email_only_when_jira_is_sure() -> None:
     assert asyncio.run(jira.account_of("hids@acme.test")) == "", "two hidden: unsure"
     assert asyncio.run(jira.account_of("nobody@acme.test")) == ""
     fake.refuse = True
-    assert asyncio.run(jira.account_of("nav@acme.test")) == "acc-nav", "kept a while"
+    assert asyncio.run(jira.account_of("nav@acme.test", reuse=True)) == "acc-nav", "kept"
+    assert asyncio.run(jira.account_of("nav@acme.test")) == "", "asked again unless reused"
     fresh = Jira(_settings(), transport=httpx.MockTransport(fake.handler))
     assert asyncio.run(fresh.account_of("nav@acme.test")) == "", "a refusal is no account"
 
@@ -797,7 +798,8 @@ def test_a_request_with_nothing_to_choose_does_not_read_jira_for_a_heads_up(
     checked: tuple[TestClient, FakeHrms], jira: FakeJira
 ) -> None:
     client, _ = checked
-    _start(client, leave_type="Casual Leave", day_portion="Full Day", reason="family")
+    _start(client, leave_type="Casual Leave", day_portion="Full Day", reason="family",
+           approver="Priya")
     assert jira.paths == []
 
 
@@ -823,15 +825,65 @@ def test_a_slow_heads_up_is_read_to_the_end_for_the_next(
         await asyncio.sleep(0.1)
         return "Heads-up: late."
 
-    async def run() -> tuple[str, asyncio.Task[str]]:
+    async def run() -> tuple[Any, asyncio.Task[str]]:
         reading = asyncio.create_task(slow())
         said = await forms._heads_up(reading)
         await asyncio.sleep(0.15)
         return said, reading
 
     said, reading = asyncio.run(run())
-    assert said == ""
+    assert said is None
     assert not reading.cancelled() and reading.result() == "Heads-up: late."
+
+
+def test_a_heads_up_read_is_kept_going_when_the_form_is_called_off() -> None:
+    async def slow() -> str:
+        await asyncio.sleep(0.1)
+        return "Heads-up: late."
+
+    async def run() -> asyncio.Task[str]:
+        reading = asyncio.create_task(slow())
+        waiting = asyncio.create_task(forms._heads_up(reading))
+        await asyncio.sleep(0.01)
+        waiting.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiting
+        assert reading in forms._LATE
+        await asyncio.sleep(0.15)
+        return reading
+
+    reading = asyncio.run(run())
+    assert reading.result() == "Heads-up: late."
+    assert reading not in forms._LATE
+
+
+def test_an_account_jira_could_not_find_is_asked_again() -> None:
+    fake = FakeJira()
+    jira = Jira(_settings(), transport=httpx.MockTransport(fake.handler))
+    assert asyncio.run(jira.account_of("nav@acme.test", reuse=True)) == ""
+    fake.users = {"nav@acme.test": [
+        {"accountId": "acc-nav", "displayName": "nav", "emailAddress": "nav@acme.test"}
+    ]}
+    assert asyncio.run(jira.account_of("nav@acme.test", reuse=True)) == "acc-nav"
+
+
+def test_the_heads_up_is_fitted_to_the_prompt_it_sits_above(
+    checked: tuple[TestClient, FakeHrms], jira: FakeJira
+) -> None:
+    client, _ = checked
+    jira.open = [
+        {**_issue(f"ECP-{i}", "Ravi"), "fields": {
+            **_issue(f"ECP-{i}", "Ravi")["fields"],
+            "summary": "Migrate the billing exports to the new warehouse " * 2,
+            "duedate": "2026-10-02",
+        }}
+        for i in range(20, 26)
+    ]
+    short = _start(client)
+    full = _start(client, leave_type="Floating Leave", day_portion="Second Half")
+    assert len(short["prompt"]) <= PROMPT_LIMIT and len(full["prompt"]) <= PROMPT_LIMIT
+    # A shorter prompt leaves more room, and the heads-up takes it.
+    assert len(short["prompt"].split("\n\n")[0]) > len(full["prompt"].split("\n\n")[0])
 
 
 def test_a_failing_heads_up_is_said_as_none_not_raised(
