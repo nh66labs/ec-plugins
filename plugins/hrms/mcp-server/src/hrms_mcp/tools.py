@@ -61,6 +61,9 @@ Taking a leave request:
    preview_leave or apply_leave for it. The only thing to ask yourself is the
    date, if they gave none. Never ask about projects or managers.
 
+When a check has a "Pending in Jira" list, show it to the person as it is,
+every ticket listed: it is what their project manager will see about them.
+
 When a check starts with "Heads-up" — teammates already off those days, open
 Jira tickets of theirs, a sprint that is tight — tell the person that first, in
 your own words and with the ticket keys, and leave the choice to them: it is a
@@ -534,6 +537,10 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
         parts = [p for p in (approvers if blocked else "", warning, head) if p]
         if balance and not short:
             parts.append(balance)
+        # The HRMS's own list of their open tickets, as their project manager's
+        # card will show it: said as it is, so both read the same.
+        if pending := str(result.get("pending_jira") or "").strip():
+            parts.append(pending)
         if jira_note:
             parts.append(jira_note)
         parts.extend(

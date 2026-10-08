@@ -396,6 +396,35 @@ def test_preview_files_nothing_and_says_so(client: TestClient, hrms: FakeHrms) -
     }
 
 
+def test_the_person_is_shown_their_open_tickets_as_their_manager_will_see_them(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    pending = (
+        "*Pending in Jira (2)* — open tickets assigned to Ravi:\n"
+        "• *ECP-4* Payments sync — In Progress, due Oct 02 — during this leave\n"
+        "• *ECP-9* Ledger export — To Do"
+    )
+    hrms.results["preview_leave"] = {
+        "effective_days": 1, "created": False, "briefing": [], "pending_jira": pending,
+    }
+    said = text(call(client, "preview_leave", {
+        "leave_type": "Casual Leave", "date_from": "2026-10-02", "day_portion": "Full Day",
+    }))
+    assert pending in said
+
+
+def test_no_pending_list_is_said_when_the_hrms_sends_none(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    hrms.results["preview_leave"] = {
+        "effective_days": 1, "created": False, "briefing": [], "pending_jira": "",
+    }
+    said = text(call(client, "preview_leave", {
+        "leave_type": "Casual Leave", "date_from": "2026-10-02", "day_portion": "Full Day",
+    }))
+    assert "Pending in Jira" not in said
+
+
 def _overlap(client: TestClient, hrms: FakeHrms, names: list[str]) -> str:
     hrms.results["preview_leave"] = {
         "effective_days": 1,
