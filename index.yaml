@@ -22,7 +22,7 @@ plugins:
   - plugin_id: hrms
     name: HRMS
     summary: Takes and decides leave requests, and helps people set their MBOs, in the company's HRMS, as the person asking.
-    version: 0.9.0
+    version: 0.10.0
     manifest: plugins/hrms/manifest.yaml
     requires:
       connectors: []
@@ -37,7 +37,7 @@ mcp_servers:
     name: HRMS MCP server
     summary: Leave and MBO tools in front of the HRMS — read, file, decide and set MBOs — acting as the person asking.
     source: plugins/hrms/mcp-server
-    image: ghcr.io/nh66labs/ec-hrms-mcp:0.9.0
+    image: ghcr.io/nh66labs/ec-hrms-mcp:0.10.0
 
 connectors:
   - connector_id: apollo
