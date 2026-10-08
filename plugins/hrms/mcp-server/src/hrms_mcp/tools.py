@@ -144,9 +144,7 @@ def portion_of(value: str) -> str:
     return " ".join(str(value or "").replace("_", " ").split()).lower()
 
 
-def _and(names: list[str]) -> str:
-    """``[A]`` → "A"; ``[A, B]`` → "A and B"; ``[A, B, C]`` → "A, B and C"."""
-    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+_and = workload._and
 
 
 def _names(names: list[str]) -> str:
@@ -252,6 +250,60 @@ def _briefing_lines(briefing: Any, *, said: str = "") -> list[str]:
     ]
 
 
+async def _own_jira(
+    hrms: Hrms, jira: Jira, ctx: Context, date_from: str, date_to: str, *, reuse: bool
+) -> tuple[list[workload.ProjectWork], dict[str, Any], str, str, date, date] | None:
+    """The asker's projects' open work in Jira, with what the rules need about
+    them — their session, email and Jira account — and the leave's dates; None
+    when Jira does not answer, or the HRMS cannot say who they are or what they
+    work on. ``reuse`` takes a recent answer from Jira (``Jira.work``). Never
+    raises: a warning left out is better than a leave that cannot be started or
+    checked."""
+    try:
+        start, end = date.fromisoformat(date_from), date.fromisoformat(date_to)
+        session = await _ask(hrms, ctx, "get_user_session", {}) or {}
+        projects = await _ask(hrms, ctx, "get_my_projects", {}) or []
+    except (ToolError, ValueError):
+        return None
+    # An HRMS that answers in plain text gives a str, not the shapes asked for.
+    if not isinstance(session, dict):
+        session = {}
+    if not isinstance(projects, list):
+        projects = []
+    names = [str(p.get("name") or "") for p in projects if isinstance(p, dict)]
+    email = str(session.get("company_email") or "")
+    work, account = await asyncio.gather(
+        jira.work(project_keys(jira.settings, names), reuse=reuse),
+        jira.account_of(email),
+    )
+    if not work:
+        return None
+    return work, session, email, account, start, end
+
+
+async def own_heads_up(
+    hrms: Hrms, jira: Jira | None, ctx: Context, date_from: str, date_to: str, *, limit: int
+) -> str:
+    """The asker's own tickets these dates touch, as one short sentence for the
+    moment they name them (``workload.own_heads_up``); empty when none, or when
+    Jira was not read. A recent answer from Jira will do: the check before
+    Confirm reads it again."""
+    if jira is None or not jira.configured:
+        return ""
+    read = await _own_jira(hrms, jira, ctx, date_from, date_to, reuse=True)
+    if read is None:
+        return ""
+    work, session, email, account, start, end = read
+    settings = jira.settings
+    return workload.own_heads_up(
+        work, str(session.get("name") or ""), email, start, end, account=account,
+        today=_today(session),
+        after_days=settings.jira_after_leave_days,
+        soon_days=settings.jira_leave_soon_days,
+        limit=limit,
+    )
+
+
 async def jira_sentences(
     hrms: Hrms, jira: Jira | None, ctx: Context, off: list[str], date_from: str, date_to: str
 ) -> tuple[list[str], str] | None:
@@ -261,24 +313,15 @@ async def jira_sentences(
 
     The person's own open tickets the leave touches, and — when a teammate is already off — any of
     their projects' sprints that is tight (``workload``). Never fails the check:
-    a Jira or an HRMS that does not answer here leaves the warning out.
+    a Jira or an HRMS that does not answer here leaves the warning out. Jira is
+    read afresh, so a ticket closed or moved since the heads-up is not warned of.
     """
     if jira is None or not jira.configured:
         return None
-    try:
-        start, end = date.fromisoformat(date_from), date.fromisoformat(date_to)
-        session = await _ask(hrms, ctx, "get_user_session", {}) or {}
-        projects = await _ask(hrms, ctx, "get_my_projects", {}) or []
-    except (ToolError, ValueError):
+    read = await _own_jira(hrms, jira, ctx, date_from, date_to, reuse=False)
+    if read is None:
         return None
-    names = [str(p.get("name") or "") for p in projects if isinstance(p, dict)]
-    email = str(session.get("company_email") or "")
-    work, account = await asyncio.gather(
-        jira.work(project_keys(jira.settings, names)),
-        jira.account_of(email),
-    )
-    if not work:
-        return None
+    work, session, email, account, start, end = read
     settings = jira.settings
     warning, note = workload.own_work(
         work, str(session.get("name") or ""), email, start, end, account=account,

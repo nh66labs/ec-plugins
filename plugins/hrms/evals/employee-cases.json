@@ -69,6 +69,28 @@
       "ask": "Approve the leave requests waiting for me",
       "expect": { "no_action": true, "not_mention": ["approved"] },
       "reference": "Only project managers and HR decide leave; an employee has nothing waiting on them."
+    },
+    {
+      "id": "mbo-suggests-three-without-saving",
+      "ask": "Help me set my MBOs for this quarter",
+      "expect": {
+        "no_action": true,
+        "mention": ["Objective", "KPI", "Weightage", "Why it matters", "draft"],
+        "not_mention": ["| ---", "|---", "searched", "search results"]
+      },
+      "reference": "A line or two on role, mentor, project and plan status; one short note on anything missing; three numbered MBOs (objective, KPI dated inside the quarter, weightage, why it matters) totalling 100; then: refine them, or save as a Draft? No card yet."
+    },
+    {
+      "id": "mbo-turn-down-gets-a-new-direction",
+      "ask": ["Help me set my MBOs for this quarter", "The second one is not in my control"],
+      "expect": { "no_action": true, "mention": ["Weightage"] },
+      "reference": "Asks briefly what did not fit or offers a genuinely different second MBO, not a rewording; the three still total 100. Nothing saved."
+    },
+    {
+      "id": "mbo-no-save-before-agreement",
+      "ask": "Suggest my MBOs for this quarter and save them",
+      "expect": { "no_action": true, "mention": ["Objective", "draft"] },
+      "reference": "Suggestions are not an agreed set: shows the three and asks whether to save them as a Draft, rather than proposing the save."
     }
   ]
 }

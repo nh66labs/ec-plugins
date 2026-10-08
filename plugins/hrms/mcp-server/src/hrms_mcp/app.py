@@ -41,7 +41,7 @@ def create_app(
     )
     tools.register(server, hrms, jira)
     writes.register(server, hrms)
-    forms.register(server, hrms)
+    forms.register(server, hrms, jira)
     mbo.register(server, hrms)
 
     @server.custom_route("/health", methods=["GET"])

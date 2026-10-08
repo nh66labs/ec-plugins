@@ -46,36 +46,28 @@ MAX_MBOS = 5
 RECENT_WORK_DAYS = 90
 #: Distinct timesheet notes shown, most recent first.
 RECENT_NOTES = 8
+#: Days left in a plan's period at which the person is told it is nearly over.
+NEARLY_OVER_DAYS = 14
 
+#: How the coach works. Kept short on purpose: the platform keeps the first
+#: 4,000 characters of a server's instructions (its ``INSTRUCTIONS_LIMIT``), and
+#: these follow the leave instructions — a longer version was cut mid-sentence,
+#: and the rules after the cut never reached the model. How suggestions are laid
+#: out travels with the context instead (``presentation_lines``).
 INSTRUCTIONS = """\
-Setting MBOs (a person's quarterly objectives):
-1. Call get_my_mbo_context first. It gives their role, mentor, projects, what
-   they have been working on, last quarter's MBOs, and this and next quarter's
-   plans with their dates and whether each can be changed. Work on the quarter
-   the person names; if they name none, the one that is open (this quarter's,
-   else next quarter's). If none is open, say why in its words; you may still
-   help them think, but nothing can be saved until HR opens it.
-2. Look at the project's situation in this Space before suggesting anything:
-   search its memory, and use its Jira and GitHub tools where there are any,
-   for milestones, deadlines, open issues and risks. Base suggestions on what
-   you find and say where it came from; never invent project facts.
-3. If you do not know what they want to grow in, ask that once, briefly.
-4. Suggest two or three MBOs at a time. Each has an objective, a KPI that can
-   be measured (a number or a date), a suggested weightage, and one line on why
-   it matters now — the project evidence, and how it serves their growth. Every
-   date in a KPI falls within the plan's period; if that period has already
-   ended or is nearly over, say so before suggesting.
-5. When they turn one down, ask in a few words what did not fit (too big, the
-   wrong focus, not in their control), then offer a genuinely different
-   direction, not a rewording of the same idea.
-6. Push back on objectives that cannot be measured and on targets the person
-   cannot influence.
-7. Agree a final set of three to five MBOs whose weightages total exactly 100.
-   Show the whole set, then call save_my_mbo_plan with the fiscal year and
-   quarter from the context and one objective, KPI and weightage per MBO. It
-   saves a Draft only; tell them to submit it in the HRMS when they are ready.
-   Never save before they have agreed the set.
-Only ever discuss the person's own MBOs.
+Setting MBOs (the person's own quarterly objectives):
+1. Call get_my_mbo_context first, and lay suggestions out as its result says.
+   Work on the quarter they name, else the open one; if none is open, say why
+   in its words.
+2. Search this Space only for their project's milestones, deadlines and risks
+   (memory, Jira, GitHub). Use only facts about that project; never invent one.
+3. Suggest exactly three MBOs straight away, weightages totalling exactly 100.
+4. When one is turned down, ask briefly what did not fit, then offer a
+   genuinely different direction. Push back on KPIs that cannot be measured or
+   that they cannot influence.
+5. Never save before they have agreed a set of three to five totalling exactly
+   100; then call save_my_mbo_plan. It saves a Draft they submit in the HRMS.
+6. Only ever discuss the person's own MBOs, never a colleague's.
 """
 
 
@@ -92,24 +84,29 @@ QUARTER_WINDOWS = {
 }
 
 
-def period_of(plan: dict[str, Any]) -> str:
-    """The plan's period as a person reads it: its own dates, else the HRMS's
-    window for that quarter — "16 Jun 2026 to 15 Sep 2026"."""
+def period_dates(plan: dict[str, Any]) -> tuple[date, date] | None:
+    """The plan's first and last day: its own dates, else the HRMS's window for
+    that quarter; None when neither can be read."""
     start, end = str(plan.get("period_start") or ""), str(plan.get("period_end") or "")
     if start and end:
         try:
-            first, last = date.fromisoformat(start[:10]), date.fromisoformat(end[:10])
-            return f"{first:%d %b %Y} to {last:%d %b %Y}"
+            return date.fromisoformat(start[:10]), date.fromisoformat(end[:10])
         except ValueError:
             pass
     try:
         year = int(str(plan.get("fiscal_year", "")).split("-")[0])
         (sm, sd), (em, ed), next_year = QUARTER_WINDOWS[int(plan.get("quarter", 0))]
     except (ValueError, KeyError):
-        return ""
+        return None
     start_year = year + (1 if sm < 4 else 0)
     end_year = year + (1 if next_year or em < 4 else 0)
-    return f"{date(start_year, sm, sd):%d %b %Y} to {date(end_year, em, ed):%d %b %Y}"
+    return date(start_year, sm, sd), date(end_year, em, ed)
+
+
+def period_of(plan: dict[str, Any]) -> str:
+    """The plan's period as a person reads it — "16 Jun 2026 to 15 Sep 2026"."""
+    dates = period_dates(plan)
+    return f"{dates[0]:%d %b %Y} to {dates[1]:%d %b %Y}" if dates else ""
 
 
 def next_quarter(fiscal_year: str, quarter: int) -> tuple[str, int]:
@@ -231,6 +228,71 @@ def work_lines(entries: Any, since: date) -> list[str]:
     return lines
 
 
+def open_plan(*plans: Any) -> dict[str, Any] | None:
+    """The first plan MBOs can be saved to — this quarter's, else next's."""
+    return next((p for p in plans if isinstance(p, dict) and p.get("can_edit")), None)
+
+
+def presentation_lines(plan: dict[str, Any] | None, today: date) -> list[str]:
+    """How the suggestions are laid out for the person, with the open plan's
+    dates in the KPI line, a warning when its period is over or nearly so, and
+    which plan a save goes to — or, with no plan open, that none can be made.
+
+    Here rather than in ``INSTRUCTIONS``: they did not fit in what the platform
+    keeps of those, and here they are read only on the turns that set MBOs, right
+    after the facts they shape. Written for a phone screen in Slack, where a
+    table arrives as raw pipes and a list of sources pushes the MBOs off screen.
+    """
+    dates = period_dates(plan) if plan else None
+    kpi = "a number or a date" + (
+        f" between {dates[0]:%d %b %Y} and {dates[1]:%d %b %Y}" if dates else ""
+    )
+    late: list[str] = []
+    if dates and dates[1] < today:
+        late = [f"- Its period ended on {dates[1]:%d %b %Y}: say so before suggesting."]
+    elif dates and (dates[1] - today).days <= NEARLY_OVER_DAYS:
+        left = (dates[1] - today).days
+        when = (
+            "today" if left == 0
+            else f"on {dates[1]:%d %b %Y}, {left} day{'s' if left != 1 else ''} from now"
+        )
+        late = [
+            f"- Its period ends {when}: say so before suggesting, and keep targets to what fits."
+        ]
+    if plan:
+        close = [
+            "- Once they agree a set, show the whole set, then call save_my_mbo_plan with the"
+            " fiscal year and quarter of the plan worked on (the open one: fiscal_year"
+            f" \"{plan.get('fiscal_year')}\", quarter {plan.get('quarter')}).",
+            "- End by asking whether to refine them (and what they want to grow in) or save"
+            " them as a Draft. Do not save yet.",
+        ]
+    else:
+        close = [
+            "- No plan is open, so nothing can be saved until HR opens one. End by asking"
+            " whether to refine them (and what they want to grow in); do not offer to save.",
+        ]
+    return [
+        "How to present suggestions (short enough to read on a phone):",
+        *late,
+        "- Open with one or two sentences: their role, mentor, project and this quarter's"
+        " plan status, citing this result once.",
+        "- If timesheet notes, project milestones or project sources are missing, say so in"
+        " one short sentence. Mention no other Slack activity, and do not describe how"
+        " anything was looked up.",
+        "- If what is known is thin, call the suggestions preliminary and use only the facts"
+        " above.",
+        "- Then three numbered MBOs, each on its own lines:",
+        "  *Objective* — one actionable goal",
+        f"  *KPI* — {kpi}",
+        "  *Weightage* — n%",
+        "  *Why it matters* — one sentence tied to their role and this quarter",
+        "  The three weightages total exactly 100. No tables; say nothing twice.",
+        "- Cite a project fact once, where it is used; no list of sources.",
+        *close,
+    ]
+
+
 # ---- the save -------------------------------------------------------------------
 
 
@@ -270,13 +332,14 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         Their role and mentor, their projects and who manages them, what they
         have logged in the last three months, last quarter's MBOs, and this and
         next quarter's plans with their dates and whether each can still be
-        changed. Call it first.
+        changed — then how to lay suggestions out. Call it first.
         """
         _identity(ctx)  # nothing is asked of the HRMS for no one
         session = await _ask(hrms, ctx, "get_user_session", {})
         profile = await _ask(hrms, ctx, "get_my_profile", {})
         current = await _ask(hrms, ctx, "get_my_mbo_plan", {})
         lines = profile_lines(profile) + [""] + plan_lines(current, "This quarter's plan")
+        upcoming: Any = None
         if isinstance(current, dict) and current.get("fiscal_year"):
             fiscal_year, quarter = previous_quarter(
                 str(current["fiscal_year"]), int(current["quarter"])
@@ -299,6 +362,7 @@ def register(server: MCPServer, hrms: Hrms) -> None:
             {"start_date": since.isoformat(), "end_date": _today(session).isoformat()},
         )
         lines += [""] + work_lines(entries, since)
+        lines += [""] + presentation_lines(open_plan(current, upcoming), _today(session))
         return "\n".join(lines)
 
     @server.tool(annotations=READ_ONLY, structured_output=False)

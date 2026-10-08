@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
@@ -27,6 +28,11 @@ _FIELDS = "summary,status,assignee,duedate"
 _LIMIT = 1000
 #: Jira Cloud caps a page at 50 on the agile endpoints and 100 on search.
 _PAGE = 50
+#: How long an answer is reused where a recent one will do: a heads-up asked
+#: again, or by a teammate on the same projects. Jira is read with one service
+#: account, so an answer is the same for anyone. A check before Confirm, or a
+#: manager's, reads afresh: a ticket closed since must not be warned of.
+FRESH_SECONDS = 300
 
 
 def _date(value: Any) -> date | None:
@@ -68,6 +74,19 @@ class Jira:
     settings: Settings
     #: Test seam: a fake Jira answers through an ``httpx.MockTransport``.
     transport: httpx.AsyncBaseTransport | None = None
+    #: Answers given, by what was asked, with when (``FRESH_SECONDS``).
+    _said: dict[tuple[str, ...], tuple[float, Any]] = field(
+        default_factory=dict, init=False, repr=False
+    )
+
+    def _recall(self, asked: tuple[str, ...]) -> Any:
+        said = self._said.get(asked)
+        return said[1] if said and time.monotonic() - said[0] < FRESH_SECONDS else None
+
+    def _keep(self, asked: tuple[str, ...], answer: Any) -> None:
+        now = time.monotonic()
+        self._said = {k: v for k, v in self._said.items() if now - v[0] < FRESH_SECONDS}
+        self._said[asked] = (now, answer)
 
     @property
     def configured(self) -> bool:
@@ -165,6 +184,8 @@ class Jira:
         someone else; they are then found by name instead."""
         if not email:
             return ""
+        if (known := self._recall(("account", email.casefold()))) is not None:
+            return known
         try:
             async with self._client() as http:
                 found = await asyncio.wait_for(
@@ -178,13 +199,18 @@ class Jira:
         exact = [
             u for u in people if str(u.get("emailAddress") or "").casefold() == email.casefold()
         ]
-        return str(exact[0]["accountId"]) if len(exact) == 1 else ""
+        account = str(exact[0]["accountId"]) if len(exact) == 1 else ""
+        self._keep(("account", email.casefold()), account)
+        return account
 
-    async def work(self, keys: list[str]) -> list[ProjectWork]:
+    async def work(self, keys: list[str], *, reuse: bool = False) -> list[ProjectWork]:
         """Each project's open work and active sprint; a project Jira would not
-        give is left out, and a Jira that does not answer gives nothing."""
+        give is left out, and a Jira that does not answer gives nothing. With
+        ``reuse``, an answer from the last ``FRESH_SECONDS`` is given again."""
         if not keys:
             return []
+        if reuse and (known := self._recall(("work", *keys))) is not None:
+            return known
         try:
             async with self._client() as http:
                 results = await asyncio.wait_for(
@@ -203,4 +229,8 @@ class Jira:
                 log.info("jira project %s skipped", key)
                 continue
             work.append(result)
+        # Only a whole answer is kept: a project left out is asked again next
+        # time, not missing from every answer for FRESH_SECONDS.
+        if len(work) == len(keys):
+            self._keep(("work", *keys), work)
         return work
