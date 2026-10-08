@@ -33,7 +33,15 @@ from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
 from hrms_mcp.hrms import Hrms
 from hrms_mcp.jira import Jira
-from hrms_mcp.tools import _ask, kind_of, manager_named, own_heads_up, portion_of, when_of
+from hrms_mcp.tools import (
+    HeadsUp,
+    _ask,
+    kind_of,
+    manager_named,
+    own_heads_up,
+    portion_of,
+    when_of,
+)
 
 log = logging.getLogger("hrms_mcp")
 
@@ -44,8 +52,9 @@ PORTIONS = (("Full Day", "Full day"), ("First Half", "First half"), ("Second Hal
 #: The HRMS's leave types, by its own names, in the order a person expects them.
 LEAVE_TYPES = ("Casual Leave", "Sick Leave", "Floating Leave")
 
-#: Most of a form's prompt the platform shows (``actions.form_of``); past it, the
-#: prompt is cut where it stands. The heads-up is sized to fit beside the rest.
+#: Most of a form's prompt the platform shows (``actions.form_of`` in Enterprise
+#: Claw — keep the two the same); past it, the prompt is cut where it stands. The
+#: heads-up is fitted to what the prompt leaves of it.
 PROMPT_LIMIT = 300
 
 #: Longest the form waits for the heads-up once the HRMS has given the form;
@@ -160,41 +169,37 @@ async def form_for(
     }
 
 
-def _longest_prompt(date_from: str, date_to: str) -> int:
-    """How long ``form_for``'s prompt can be for these dates, whatever is chosen."""
-    what = max((kind_of(t) for t in (*LEAVE_TYPES, "")), key=len)
-    portion = max((portion_of(value) for value, _ in PORTIONS), key=len)
-    return len(f"{what} for {when_of(date_from, date_to)}, {portion} — choose the rest:")
-
-
 #: Heads-ups still being read after the form went without them. Held so they
-#: are not collected half-read: Jira's answer, once read, is kept for the next.
-_LATE: set[asyncio.Task[str]] = set()
+#: are not collected half-read: what was read, once read, is kept for the next.
+_LATE: set[asyncio.Task[HeadsUp | None]] = set()
 
 
 async def _read_heads_up(
-    hrms: Hrms, jira: Jira | None, ctx: Context, date_from: str, date_to: str, limit: int
-) -> str:
-    """``own_heads_up``, or "" when anything goes wrong. A slow Jira, or an HRMS
-    that answers oddly, never fails the form: the check before Confirm still
-    says it in full."""
+    hrms: Hrms, jira: Jira | None, ctx: Context, date_from: str, date_to: str
+) -> HeadsUp | None:
+    """``own_heads_up``, or None when anything goes wrong. A slow Jira, or an
+    HRMS that answers oddly, never fails the form: the check before Confirm
+    still says it in full."""
     try:
-        return await own_heads_up(hrms, jira, ctx, date_from, date_to, limit=limit)
+        return await own_heads_up(hrms, jira, ctx, date_from, date_to)
     except Exception:
         log.info("leave heads-up skipped")
-        return ""
+        return None
 
 
-async def _heads_up(reading: asyncio.Task[str]) -> str:
+async def _heads_up(reading: asyncio.Task[HeadsUp | None]) -> HeadsUp | None:
     """The heads-up, if it comes within ``HEADS_UP_WAIT_SECONDS`` of the form;
-    else none. Past that, the read goes on alone rather than being thrown away."""
+    else none. Past that — or when the form itself is called off — the read goes
+    on alone rather than being thrown away."""
     try:
         return await asyncio.wait_for(asyncio.shield(reading), HEADS_UP_WAIT_SECONDS)
-    except TimeoutError:
-        log.info("leave heads-up skipped: slow")
+    except (TimeoutError, asyncio.CancelledError) as stopped:
         _LATE.add(reading)
         reading.add_done_callback(_LATE.discard)
-        return ""
+        if isinstance(stopped, asyncio.CancelledError):
+            raise
+        log.info("leave heads-up skipped: slow")
+        return None
 
 
 def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
@@ -224,20 +229,19 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
                 "then call this again."
             )
         date_to = date_to if _valid_date(date_to) else date_from
-        # Sized to fit beside the longest line the prompt could have.
-        room = PROMPT_LIMIT - _longest_prompt(date_from, date_to) - len("\n\n")
 
-        def read() -> asyncio.Task[str]:
-            return asyncio.create_task(
-                _read_heads_up(hrms, jira, ctx, date_from, date_to, room)
-            )
+        def read() -> asyncio.Task[HeadsUp | None]:
+            return asyncio.create_task(_read_heads_up(hrms, jira, ctx, date_from, date_to))
 
-        # With something sure to be asked, read beside the HRMS, so the form
-        # waits only for the slower. Otherwise only the approver may be: with
-        # nothing left to choose, the check runs at once and says it in full —
-        # said here as well, it would be read twice in a row, and read for
-        # nothing.
-        asks = not (_type_named(leave_type) and _portion_named(day_portion) and reason.strip())
+        # Read beside the HRMS, so the form waits only for the slower, unless
+        # nothing can be left to choose: with every detail named, the check runs
+        # at once and says it in full — said here as well, it would be read twice
+        # in a row. An approver not named may still be asked (several managers);
+        # if it is not, the read is called off.
+        asks = not (
+            _type_named(leave_type) and _portion_named(day_portion) and reason.strip()
+            and approver.strip()
+        )
         reading = read() if asks else None
         try:
             form = await form_for(
@@ -247,8 +251,13 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
             if reading is not None:
                 reading.cancel()
             raise
-        if form["questions"] and (heads_up := await _heads_up(reading or read())):
-            form["prompt"] = f"{heads_up}\n\n{form['prompt']}"
+        if not form["questions"]:
+            if reading is not None:
+                reading.cancel()
+        elif say := await _heads_up(reading or read()):
+            # Fitted to the prompt as it is, beside what the platform shows.
+            if heads_up := say(PROMPT_LIMIT - len(form["prompt"]) - len("\n\n")):
+                form["prompt"] = f"{heads_up}\n\n{form['prompt']}"
         missing = ", ".join(q["label"].lower() for q in form["questions"]) or "nothing"
         return CallToolResult(
             content=[
