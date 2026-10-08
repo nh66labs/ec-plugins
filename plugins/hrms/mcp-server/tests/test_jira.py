@@ -15,14 +15,17 @@ import httpx
 import pytest
 from starlette.testclient import TestClient
 
+from hrms_mcp import forms
 from hrms_mcp import jira as jira_module
 from hrms_mcp.app import create_app
 from hrms_mcp.config import Settings
+from hrms_mcp.forms import PROMPT_LIMIT
 from hrms_mcp.jira import Jira, project_keys, ticket_of
 from hrms_mcp.workload import (
     ProjectWork,
     Sprint,
     Ticket,
+    own_heads_up,
     own_work,
     their_work,
     tight_sprints,
@@ -340,6 +343,58 @@ class FakeJira:
         return httpx.Response(404)
 
 
+# -- the heads-up when the dates are named -----------------------------------------------
+
+
+def test_the_heads_up_names_only_the_tickets_the_leave_touches() -> None:
+    said = own_heads_up(_around_the_leave(), "Ravi", "", NOV12, NOV12, today=FAR)
+    assert said == (
+        "Heads-up: you have 2 open Jira tickets to hand over before you go: ECP-1 Task ECP-1 "
+        "and ECP-2 Task ECP-2. You can still apply."
+    )
+
+
+def test_the_heads_up_says_a_handover_not_a_due_date_for_overdue_and_undated_tickets() -> None:
+    soon = own_heads_up(_around_the_leave(), "Ravi", "", NOV12, NOV12, today=SOON, limit=400)
+    assert "ECP-5 Task ECP-5" in soon  # overdue
+    assert soon.startswith("Heads-up: you have 5 open Jira tickets to hand over before you go:")
+    assert "due around" not in soon
+
+
+def test_the_heads_up_drops_the_tickets_then_the_close_then_itself_rather_than_be_cut() -> None:
+    lead = "Heads-up: you have 2 open Jira tickets to hand over before you go"
+    work = _around_the_leave()
+    assert own_heads_up(work, "Ravi", "", NOV12, NOV12, today=FAR, limit=len(lead) + 22) == (
+        f"{lead}. You can still apply."
+    )
+    assert own_heads_up(work, "Ravi", "", NOV12, NOV12, today=FAR, limit=len(lead) + 1) == (
+        f"{lead}."
+    )
+    assert own_heads_up(work, "Ravi", "", NOV12, NOV12, today=FAR, limit=len(lead)) == ""
+
+
+def test_no_heads_up_when_the_leave_touches_none_of_theirs() -> None:
+    far_off = [ProjectWork("ECP", open_tickets=[_t("ECP-3", "Ravi", due=date(2026, 11, 18))])]
+    assert own_heads_up(far_off, "Ravi", "", NOV12, NOV12, today=FAR) == ""
+    assert own_heads_up(_around_the_leave("Bala"), "Ravi", "", NOV12, NOV12, today=FAR) == ""
+
+
+def test_the_heads_up_lists_fewer_and_shorter_rather_than_be_cut() -> None:
+    long = "Migrate the billing exports to the new warehouse and retire the old cron jobs"
+    work = [ProjectWork("ECP", open_tickets=[
+        Ticket(key=f"ECP-{i}", summary=long, status="To Do", category="new",
+               assignee_name="Ravi", due=NOV12)
+        for i in range(1, 6)
+    ])]
+    roomy = own_heads_up(work, "Ravi", "", NOV12, NOV12, today=FAR, limit=400)
+    assert "ECP-1 Migrate the billing exports to the new… and" not in roomy
+    assert "ECP-3 Migrate the billing exports to the new… and 2 more." in roomy
+    for limit in (220, 160, 120):
+        said = own_heads_up(work, "Ravi", "", NOV12, NOV12, today=FAR, limit=limit)
+        assert len(said) <= limit and said.startswith("Heads-up: you have 5 open Jira tickets")
+        assert said.endswith("You can still apply.")
+
+
 def test_the_operators_map_names_the_jira_projects() -> None:
     assert project_keys(_settings(), ["ec platform", "Payroll", "Other"]) == ["ECP", "PAY"]
 
@@ -422,7 +477,9 @@ def test_an_account_is_found_by_email_only_when_jira_is_sure() -> None:
     assert asyncio.run(jira.account_of("hids@acme.test")) == "", "two hidden: unsure"
     assert asyncio.run(jira.account_of("nobody@acme.test")) == ""
     fake.refuse = True
-    assert asyncio.run(jira.account_of("nav@acme.test")) == "", "a refusal is no account"
+    assert asyncio.run(jira.account_of("nav@acme.test")) == "acc-nav", "kept a while"
+    fresh = Jira(_settings(), transport=httpx.MockTransport(fake.handler))
+    assert asyncio.run(fresh.account_of("nav@acme.test")) == "", "a refusal is no account"
 
 
 def test_unconfigured_jira_is_never_called() -> None:
@@ -658,3 +715,176 @@ def test_open_tickets_the_leave_does_not_touch_are_a_plain_line_not_a_warning(
     assert "Jira ticket" not in warning
     assert head.startswith("Casual leave on Fri 2 Oct 2026")
     assert note == "Your 1 open Jira ticket is not due around your leave."
+
+
+def _start(client: TestClient, **given: str) -> dict:
+    return call(client, "start_leave_request", {"date_from": "2026-10-02", **given})[
+        "_meta"]["ec/form"]
+
+
+def test_the_employee_is_told_of_their_tickets_as_soon_as_they_name_the_date(
+    checked: tuple[TestClient, FakeHrms],
+) -> None:
+    client, _ = checked
+    form = _start(client)
+    assert form["prompt"] == (
+        "Heads-up: you have an open Jira ticket to hand over before you go: ECP-2 Task ECP-2. "
+        "You can still apply.\n\n"
+        "Leave for Fri 2 Oct 2026 — choose the rest:"
+    )
+    assert len(form["prompt"]) <= PROMPT_LIMIT
+    assert [q["name"] for q in form["questions"]] == ["leave_type", "day_portion", "reason"]
+
+
+def test_a_request_with_nothing_to_choose_leaves_the_heads_up_to_the_check(
+    checked: tuple[TestClient, FakeHrms],
+) -> None:
+    client, _ = checked
+    form = _start(client, leave_type="Casual Leave", day_portion="Full Day", reason="family")
+    assert form["prompt"] == "Casual leave for Fri 2 Oct 2026, full day."
+
+
+def test_a_jira_that_does_not_answer_still_starts_the_request(
+    checked: tuple[TestClient, FakeHrms], jira: FakeJira
+) -> None:
+    client, _ = checked
+    jira.refuse = True
+    assert _start(client)["prompt"] == "Leave for Fri 2 Oct 2026 — choose the rest:"
+
+
+def test_an_hrms_that_answers_in_plain_text_still_starts_the_request(
+    checked: tuple[TestClient, FakeHrms],
+) -> None:
+    client, hrms = checked
+    hrms.results["get_user_session"] = "Service temporarily unavailable"
+    assert _start(client)["prompt"] == "Leave for Fri 2 Oct 2026 — choose the rest:"
+
+
+def test_a_slow_jira_does_not_hold_up_the_form(
+    checked: tuple[TestClient, FakeHrms], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, _ = checked
+
+    async def never(*_: Any, **__: Any) -> str:
+        await asyncio.sleep(3600)
+        return "never said"
+
+    monkeypatch.setattr(forms, "own_heads_up", never)
+    monkeypatch.setattr(forms, "HEADS_UP_WAIT_SECONDS", 0.05)
+    assert _start(client)["prompt"] == "Leave for Fri 2 Oct 2026 — choose the rest:"
+
+
+def test_a_heads_up_asked_again_reuses_what_jira_said(
+    checked: tuple[TestClient, FakeHrms], jira: FakeJira
+) -> None:
+    client, _ = checked
+    assert _start(client)["prompt"].startswith("Heads-up:")
+    searched = jira.paths.count("/rest/api/3/search/jql")
+    assert _start(client)["prompt"].startswith("Heads-up:")
+    assert jira.paths.count("/rest/api/3/search/jql") == searched
+
+
+def test_the_check_reads_jira_afresh_so_a_ticket_closed_since_is_not_warned_of(
+    checked: tuple[TestClient, FakeHrms], jira: FakeJira
+) -> None:
+    client, _ = checked
+    assert "ECP-2" in _start(client)["prompt"]
+    jira.open = [_issue("ECP-1", "Anu")]  # ECP-2 closed in Jira since
+    assert "Jira ticket" not in _preview(client)
+
+
+def test_a_request_with_nothing_to_choose_does_not_read_jira_for_a_heads_up(
+    checked: tuple[TestClient, FakeHrms], jira: FakeJira
+) -> None:
+    client, _ = checked
+    _start(client, leave_type="Casual Leave", day_portion="Full Day", reason="family")
+    assert jira.paths == []
+
+
+def test_only_the_approver_left_to_choose_still_gives_the_heads_up(
+    checked: tuple[TestClient, FakeHrms],
+) -> None:
+    client, hrms = checked
+    hrms.results["get_employee_project_managers"] = {
+        "count": 2,
+        "project_managers": [{"id": "pm-1", "name": "Priya"}, {"id": "pm-2", "name": "Kiran"}],
+    }
+    form = _start(client, leave_type="Casual Leave", day_portion="Full Day", reason="family")
+    assert [q["name"] for q in form["questions"]] == ["approver"]
+    assert form["prompt"].startswith("Heads-up:")
+
+
+def test_a_slow_heads_up_is_read_to_the_end_for_the_next(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(forms, "HEADS_UP_WAIT_SECONDS", 0.02)
+
+    async def slow() -> str:
+        await asyncio.sleep(0.1)
+        return "Heads-up: late."
+
+    async def run() -> tuple[str, asyncio.Task[str]]:
+        reading = asyncio.create_task(slow())
+        said = await forms._heads_up(reading)
+        await asyncio.sleep(0.15)
+        return said, reading
+
+    said, reading = asyncio.run(run())
+    assert said == ""
+    assert not reading.cancelled() and reading.result() == "Heads-up: late."
+
+
+def test_a_failing_heads_up_is_said_as_none_not_raised(
+    checked: tuple[TestClient, FakeHrms], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, _ = checked
+
+    async def broken(*_: Any, **__: Any) -> str:
+        raise RuntimeError("odd answer")
+
+    monkeypatch.setattr(forms, "own_heads_up", broken)
+    assert _start(client)["prompt"] == "Leave for Fri 2 Oct 2026 — choose the rest:"
+
+
+def test_a_project_jira_would_not_give_is_asked_again_rather_than_kept_out() -> None:
+    fake = FakeJira()
+    failing = {"OPS"}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        jql = request.url.params.get("jql", "")
+        if any(key in jql for key in failing) or (
+            request.url.params.get("projectKeyOrId") in failing
+        ):
+            return httpx.Response(500)
+        return fake.handler(request)
+
+    reader = Jira(_settings(), httpx.MockTransport(handler))
+    first = asyncio.run(reader.work(["ECP", "OPS"], reuse=True))
+    assert [p.key for p in first] == ["ECP"]
+    failing.clear()
+    again = asyncio.run(reader.work(["ECP", "OPS"], reuse=True))
+    assert [p.key for p in again] == ["ECP", "OPS"]
+
+
+def test_the_heads_up_counts_at_least_when_a_project_was_read_in_part() -> None:
+    work = [ProjectWork("ECP", open_tickets=[_t("ECP-1", "Ravi", due=NOV12)], complete=False)]
+    said = own_heads_up(work, "Ravi", "", NOV12, NOV12, today=FAR)
+    assert said.startswith("Heads-up: you have at least 1 open Jira ticket to hand over")
+
+
+def test_the_heads_up_fits_beside_the_longest_prompt(
+    checked: tuple[TestClient, FakeHrms], jira: FakeJira
+) -> None:
+    client, _ = checked
+    jira.open = [
+        {**_issue(f"ECP-{i}", "Ravi"), "fields": {
+            **_issue(f"ECP-{i}", "Ravi")["fields"],
+            "summary": "Migrate the billing exports to the new warehouse " * 2,
+            "duedate": "2026-10-07",
+        }}
+        for i in range(20, 26)
+    ]
+    form = _start(client, date_to="2026-10-07", leave_type="Floating Leave",
+                  day_portion="Second Half")
+    assert form["prompt"].startswith("Heads-up: you have 6 open Jira tickets")
+    assert len(form["prompt"]) <= PROMPT_LIMIT

@@ -41,6 +41,11 @@ PREVIOUS = {
 }
 
 
+#: What Enterprise Claw keeps of a server's instructions (its
+#: ``INSTRUCTIONS_LIMIT``, EC-D180); the rest is cut without a word.
+PLATFORM_INSTRUCTIONS_LIMIT = 4_000
+
+
 @pytest.fixture()
 def mbo_hrms(hrms: FakeHrms) -> FakeHrms:  # noqa: F811
     hrms.results.update({
@@ -107,11 +112,25 @@ def test_the_handshake_carries_the_mbo_coaching(client) -> None:  # noqa: F811
         {"protocolVersion": "2025-06-18", "capabilities": {},
          "clientInfo": {"name": "enterprise-claw", "version": "2"}},
     ).json()["result"]
-    said = result["instructions"]
+    # What the platform keeps of it, not what is sent: the rules past its limit
+    # never reach the model, which is how "never save" was once lost unnoticed.
+    said = result["instructions"][:PLATFORM_INSTRUCTIONS_LIMIT]
     assert "get_my_mbo_context first" in said
+    assert "exactly three MBOs" in said
     assert "genuinely different" in said
-    assert "total exactly 100" in said
+    assert "totalling exactly\n   100" in said
     assert "Never save before they have agreed" in said
+    assert "Only ever discuss the person's own MBOs" in said
+
+
+
+def test_the_instructions_fit_what_the_platform_keeps(client) -> None:  # noqa: F811
+    result = rpc(
+        client, "initialize",
+        {"protocolVersion": "2025-06-18", "capabilities": {},
+         "clientInfo": {"name": "enterprise-claw", "version": "2"}},
+    ).json()["result"]
+    assert len(result["instructions"]) <= PLATFORM_INSTRUCTIONS_LIMIT
 
 
 # --- the context ------------------------------------------------------------------
@@ -130,6 +149,34 @@ def test_the_context_gathers_what_the_hrms_knows_as_lines(client, mbo_hrms) -> N
     assert "Phoenix: 13 hours" in said and "Training: 2 hours" in said
     assert "invoice API" in said
     assert "Next quarter's plan (Q4 2026-27, 16 Dec 2026 to 15 Mar 2027): Not started." in said
+
+
+def test_the_context_ends_with_how_to_present_suggestions(client, mbo_hrms) -> None:  # noqa: F811
+    _plans(mbo_hrms, PLAN, PREVIOUS)
+    said = text(call(client, "get_my_mbo_context"))
+    guide = said[said.index("How to present suggestions"):]
+
+    # KPI dates are this quarter's, the open one.
+    assert "between 16 Sep 2026 and 15 Dec 2026" in guide
+    assert "three numbered MBOs" in guide and "total exactly 100" in guide
+    assert "No tables" in guide and "no list of sources" in guide
+    assert "Mention no other Slack activity" in guide
+    assert guide.rstrip().endswith("save them as a Draft. Do not save yet.")
+
+
+def test_the_guide_dates_kpis_in_next_quarter_when_only_it_is_open(
+    client, mbo_hrms,  # noqa: F811
+) -> None:
+    closed = {**PLAN, "status": "Submitted", "can_edit": False}
+    _plans(mbo_hrms, closed, PREVIOUS, {**NEXT, "can_edit": True})
+    said = text(call(client, "get_my_mbo_context"))
+    assert "between 16 Dec 2026 and 15 Mar 2027" in said
+
+
+def test_the_guide_names_no_dates_when_no_plan_is_open(client, mbo_hrms) -> None:  # noqa: F811
+    _plans(mbo_hrms, {**PLAN, "can_edit": False}, PREVIOUS)
+    said = text(call(client, "get_my_mbo_context"))
+    assert "*KPI* — a number or a date\n" in said
 
 
 def test_the_context_asks_for_the_quarter_before_and_the_last_three_months(
@@ -276,5 +323,34 @@ def test_the_quarter_after_crosses_the_fiscal_year() -> None:
 
 
 def test_the_coaching_keeps_deadlines_inside_the_period() -> None:
-    assert "falls within the plan's period" in mbo.INSTRUCTIONS
-    assert "next quarter's" in mbo.INSTRUCTIONS
+    plan = {"fiscal_year": "2026-27", "quarter": 3, "can_edit": True}
+    lines = mbo.presentation_lines(plan, date(2026, 9, 20))
+    assert "  *KPI* — a number or a date between 16 Sep 2026 and 15 Dec 2026" in lines
+    assert not any("period end" in line for line in lines)
+    assert any(
+        'call save_my_mbo_plan with the fiscal year and quarter of the plan worked on (the open'
+        ' one: fiscal_year "2026-27", quarter 3)' in line and "show the whole set" in line
+        for line in lines
+    )
+    assert "lay suggestions out as its result says" in mbo.INSTRUCTIONS
+
+
+def test_the_coaching_warns_when_the_period_is_nearly_over_or_over() -> None:
+    plan = {"fiscal_year": "2026-27", "quarter": 3, "can_edit": True}
+    assert (
+        "- Its period ends on 15 Dec 2026, 3 days from now: say so before suggesting, and keep"
+        " targets to what fits." in mbo.presentation_lines(plan, date(2026, 12, 12))
+    )
+    assert "- Its period ended on 15 Dec 2026: say so before suggesting." in (
+        mbo.presentation_lines(plan, date(2026, 12, 20))
+    )
+    assert (
+        "- Its period ends today: say so before suggesting, and keep targets to what fits."
+        in mbo.presentation_lines(plan, date(2026, 12, 15))
+    )
+
+
+def test_with_no_plan_open_the_coaching_offers_no_save() -> None:
+    said = "\n".join(mbo.presentation_lines(None, date(2026, 9, 20)))
+    assert "nothing can be saved until HR opens one" in said
+    assert "save them as a Draft" not in said and "save_my_mbo_plan" not in said

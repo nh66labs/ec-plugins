@@ -240,12 +240,39 @@ def _placed(
     ))
 
 
+def _and(items: list[str]) -> str:
+    """``[A]`` → "A"; ``[A, B]`` → "A and B"; ``[A, B, C]`` → "A, B and C"."""
+    return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} and {items[-1]}"
+
+
 def _named(placed: list[_Placed], limit: int, more: str = "more") -> str:
     shown = [str(p) for p in placed[:limit]]
     rest = len(placed) - len(shown)
     if rest:
         shown.append(f"{rest} {more}")
-    return shown[0] if len(shown) == 1 else f"{', '.join(shown[:-1])} and {shown[-1]}"
+    return _and(shown)
+
+
+def _touched(
+    projects: list[ProjectWork],
+    name: str,
+    email: str,
+    leave_from: date,
+    leave_to: date,
+    account: str,
+    today: date | None,
+    after_days: int,
+    soon_days: int,
+) -> tuple[list[_Placed], int] | None:
+    """The person's own open tickets this leave touches, most pressing first, and
+    how many others of theirs it does not; None when they have no open ticket.
+    What ``own_work`` and ``own_heads_up`` both name, so they name the same."""
+    mine = [t for p in projects for t in p.open_tickets if t.open and _is(t, name, email, account)]
+    if not mine:
+        return None
+    placed = _placed(projects, mine, leave_from, leave_to, today, after_days, soon_days, True)
+    named = [p for p in placed if p.where != UNTOUCHED]
+    return named, len(placed) - len(named)
 
 
 def _tickets(count: int) -> str:
@@ -268,17 +295,17 @@ def own_work(
     tickets the leave touches; the note, when it touches none, says the rest were
     looked at — information, not a reason to think twice. Either may be empty.
     ``today`` unknown, the leave is taken to be far off."""
-    mine = [t for p in projects for t in p.open_tickets if t.open and _is(t, name, email, account)]
     partial = [p.key for p in projects if not p.complete]
     caveat = (
         f"Only some of the open tickets in {', '.join(partial)} could be read, so some "
         "of yours may not be counted." if partial else ""
     )
-    if not mine:
+    touched = _touched(
+        projects, name, email, leave_from, leave_to, account, today, after_days, soon_days
+    )
+    if touched is None:
         return "", caveat
-    placed = _placed(projects, mine, leave_from, leave_to, today, after_days, soon_days, True)
-    named = [p for p in placed if p.where != UNTOUCHED]
-    rest = len(placed) - len(named)
+    named, rest = touched
     if not named:
         if rest == 1:
             note = "Your 1 open Jira ticket is not due around your leave."
@@ -292,6 +319,65 @@ def own_work(
         other = f"{rest} other open ticket{'s' if rest != 1 else ''}"
         warning += f" {other} of yours {'are' if rest != 1 else 'is'} not due around your leave."
     return f"{warning} {caveat}".rstrip(), ""
+
+
+#: Longest summary the early heads-up shows a ticket by; the check shows it whole.
+HEADS_UP_SUMMARY = 40
+
+
+def own_heads_up(
+    projects: list[ProjectWork],
+    name: str,
+    email: str,
+    leave_from: date,
+    leave_to: date,
+    account: str = "",
+    *,
+    today: date | None = None,
+    after_days: int = AFTER_DAYS,
+    soon_days: int = SOON_DAYS,
+    limit: int = 220,
+) -> str:
+    """The person's own tickets this leave touches, said once, briefly, as soon as
+    they name the dates — "Heads-up: you have 2 open Jira tickets to hand over
+    before you go: ECP-1 Fix login and ECP-2 Ship v2. …". Empty when it touches
+    none. Said as a handover, not a due date: some are overdue or have none.
+
+    The same tickets as ``own_work`` names (``_touched``), in the same order, but
+    only their key and a short summary: it sits above the choices still to make, and the check
+    before Confirm gives each one's status and deadline. Never longer than
+    ``limit``: fewer tickets are listed, then summaries dropped, then the tickets
+    and the closing words, before it would be cut mid-sentence by whatever shows
+    it; empty when even the lead does not fit.
+    """
+    touched = _touched(
+        projects, name, email, leave_from, leave_to, account, today, after_days, soon_days
+    )
+    named = [p.ticket for p in touched[0]] if touched else []
+    if not named:
+        return ""
+    count = "an open Jira ticket" if len(named) == 1 else f"{len(named)} open Jira tickets"
+    # A project read only in part may hold more of theirs: the count is a floor.
+    if any(not p.complete for p in projects):
+        count = f"at least {_tickets(len(named))}"
+    lead = f"Heads-up: you have {count} to hand over before you go"
+    close = "You can still apply."
+
+    def short(ticket: Ticket, room: int) -> str:
+        summary = " ".join(ticket.summary.split())
+        if len(summary) > room:
+            summary = summary[: room - 1].rstrip() + "…"
+        return f"{ticket.key} {summary}" if room and summary else ticket.key
+
+    for shown in range(min(len(named), LISTED), 0, -1):
+        for room in (HEADS_UP_SUMMARY, 0):
+            items = [short(t, room) for t in named[:shown]]
+            if len(named) > shown:
+                items.append(f"{len(named) - shown} more")
+            said = f"{lead}: {_and(items)}. {close}"
+            if len(said) <= limit:
+                return said
+    return next((said for said in (f"{lead}. {close}", f"{lead}.") if len(said) <= limit), "")
 
 
 def their_work(
