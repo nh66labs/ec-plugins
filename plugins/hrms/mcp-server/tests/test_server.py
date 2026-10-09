@@ -445,8 +445,8 @@ def _overlap(client: TestClient, hrms: FakeHrms, names: list[str]) -> str:
 def test_a_teammate_already_off_is_warned_of_first(client: TestClient, hrms: FakeHrms) -> None:
     said = _overlap(client, hrms, ["Anu"])
     assert said.splitlines()[0] == (
-        "Heads-up: Anu has already applied for leave on Fri 2 Oct 2026, so it may be "
-        "difficult to approve. Do you still want to apply?"
+        "Heads-up: Anu has already applied for leave on the same day. "
+        "Do you still want to proceed?"
     )
     assert "Team:" not in said  # said once, not twice
     assert "Calendar: no meetings that day." in said and "Balance: 10.0" in said
@@ -530,7 +530,7 @@ def test_the_check_words_half_days_ranges_and_a_short_balance(
     }))
     assert said.startswith(
         "Heads-up: You have no sick leave left, and this needs half a day. "
-        "Do you still want to apply?\n"
+        "Do you still want to proceed?\n"
         "Sick leave from Mon 5 Oct 2026 to Tue 6 Oct 2026, first half — half a day."
     )
 
@@ -542,7 +542,7 @@ def test_a_balance_short_by_some_says_by_how_much(client: TestClient, hrms: Fake
     }
     assert _check(client).startswith(
         "Heads-up: You have 1 day of casual leave left, and this needs 3 days — "
-        "2 days more than you have. Do you still want to apply?"
+        "2 days more than you have. Do you still want to proceed?"
     )
     hrms.results["preview_leave"]["facts"]["balance"]["available"] = 0.5
     assert "You have half a day of casual leave left" in _check(client)
