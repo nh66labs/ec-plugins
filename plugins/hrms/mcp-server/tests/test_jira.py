@@ -532,11 +532,11 @@ def test_the_check_warns_once_with_the_teammate_the_sprint_and_the_persons_ticke
     said = _preview(client)
     warning = said.splitlines()[0]
     assert warning == (
-        "Heads-up: Anu has already applied for leave on Fri 2 Oct 2026, so it may be difficult "
-        "to approve. ECP's sprint “Sprint 14” ends on Mon 5 Oct with 6 of 10 tickets still to "
+        "Heads-up: Anu has already applied for leave on the same day. ECP's sprint "
+        "“Sprint 14” ends on Mon 5 Oct with 6 of 10 tickets still to "
         "do or in progress, including Anu's ECP-1 Task ECP-1 (In Progress). You have 1 open "
         "Jira ticket to hand over before you go: ECP-2 Task ECP-2 (In Progress, no due date; "
-        "sprint “Sprint 14” ends Mon 5 Oct, the day you're back). Do you still want to apply?"
+        "sprint “Sprint 14” ends Mon 5 Oct, the day you're back). Do you still want to proceed?"
     )
     assert "Jira: Ticket" not in said, "said once, in the warning"
     assert "Balance: 10.0" in said and "Nothing is filed until you confirm." in said
@@ -549,8 +549,8 @@ def test_a_jira_that_does_not_answer_leaves_the_hrms_check_as_it_was(
     jira.refuse = True
     said = _preview(client)
     assert said.splitlines()[0] == (
-        "Heads-up: Anu has already applied for leave on Fri 2 Oct 2026, so it may be difficult "
-        "to approve. Do you still want to apply?"
+        "Heads-up: Anu has already applied for leave on the same day. "
+        "Do you still want to proceed?"
     )
     assert "Jira: Ticket ECP-2 is due on 2026-10-02." in said, "the HRMS's own Jira line stays"
 

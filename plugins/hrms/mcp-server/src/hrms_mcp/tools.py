@@ -61,8 +61,8 @@ Taking a leave request:
    preview_leave or apply_leave for it. The only thing to ask yourself is the
    date, if they gave none. Never ask about projects or managers.
 
-When a check has a "Pending in Jira" list, show it as it is, every ticket: it
-is what their project manager will see.
+When a check has a "Pending in Jira" list, filter it as preview_leave says:
+it is what their project manager will see.
 
 When a check starts with "Heads-up" — teammates already off, open Jira tickets,
 a tight sprint — tell the person that first, with the ticket keys, and leave the
@@ -171,10 +171,8 @@ def teammates_sentence(names: list[str], date_from: str, date_to: str) -> str:
     if not names:
         return ""
     have = "has" if len(names) == 1 else "have"
-    return (
-        f"{_names(names)} {have} already applied for leave on "
-        f"{when_of(date_from, date_to)}, so it may be difficult to approve."
-    )
+    days = "day" if date_from == date_to else "days"
+    return f"{_names(names)} {have} already applied for leave on the same {days}."
 
 
 def warning_of(sentences: list[str]) -> str:
@@ -182,7 +180,7 @@ def warning_of(sentences: list[str]) -> str:
     never blocks — whether to go ahead is the person's call, made on the Confirm
     that follows."""
     said = [s for s in sentences if s]
-    return f"Heads-up: {' '.join(said)} Do you still want to apply?" if said else ""
+    return f"Heads-up: {' '.join(said)} Do you still want to proceed?" if said else ""
 
 
 def _number(value: Any) -> bool:
@@ -504,7 +502,16 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
         before apply_leave with the same details, approver included if one was
         chosen. The answer is written to the person asking. When it says no
         approver was chosen, or the name given is not one of theirs, call
-        start_leave_request so they choose — do not ask them yourself."""
+        start_leave_request so they choose — do not ask them yourself.
+
+        Of the Jira tickets it lists, in its heads-up and its "Pending in Jira"
+        list alike, name only those in the person's current sprint and due on or
+        after the leave's first day — the same tickets their project manager is
+        shown. Leave out one due before the leave starts, even if still open: a
+        ticket due Oct 15 or Oct 20 is not named for a leave from Nov 7. Leave
+        out one with no due date, or in no current sprint. When none is left,
+        say none of their current sprint's tickets fall due on or after the
+        leave; do not list or count the ones left out."""
         result = await _ask(
             hrms,
             ctx,
@@ -599,7 +606,15 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
         project manager or HR asking about it: the applicant's open Jira tickets
         by key and summary, a sprint of theirs that is tight, and the HRMS's own
         briefing — meetings that day, teammates also off, balance. request_id
-        comes from list_leave_requests_to_decide; never show it to the person."""
+        comes from list_leave_requests_to_decide; never show it to the person.
+
+        Of the tickets it lists, name only those in the applicant's current
+        sprint and due on or after the leave's first day — the same tickets the
+        applicant was shown. Leave out one due before the leave starts, even if
+        still open: a ticket due Oct 15 or Oct 20 is not named for a leave from
+        Nov 7. Leave out one with no due date, or in no current sprint. When
+        none is left, say none of their current sprint's tickets fall due on or
+        after the leave; do not list or count the ones left out."""
         identity = _identity(ctx)
         item = None
         for status in IMPACT_STATUSES:
