@@ -78,7 +78,7 @@
         "mention": ["KPI", "Why:", "%", "draft"],
         "not_mention": ["| ---", "|---", "searched", "search results", "acceptance checks"]
       },
-      "reference": "About 100 words, laid out: a bold line with the quarter's plan and its status; an italic line with designation and project; an italic line on anything missing; then three numbered MBOs, each a bold objective of at most 8 words with its weightage, then two bullets, KPI (dated inside the quarter) and Why; totalling 100; no account of the acceptance checks; then one short question: refine them, or save as a Draft? No card yet."
+      "reference": "About 120 words, laid out: one status line (the quarter's plan and its status in bold, then designation and project); two short, natural sentences on why these three and anything missing; then three numbered MBOs, each a bold objective of at most 8 words with its weightage, then two bullets, KPI (dated inside the quarter) and Why; totalling 100; no account of the acceptance checks; then one short question: refine them, or save as a Draft? No card yet."
     },
     {
       "id": "mbo-turn-down-gets-a-new-direction",

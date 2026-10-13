@@ -348,15 +348,16 @@ def presentation_lines(
         f'- "{guides.role}", {level}: what is expected of them; tie each MBO to it.',
         "- Apply the guides; do not quote them or explain that the MBOs pass them.",
         "",
-        "How to present suggestions (neat on a phone in Slack; about 100 words):",
+        "How to present suggestions (neat on a phone in Slack; about 120 words):",
         *late,
         "- Lay the answer out exactly in this form, with nothing between its parts:",
         "  **<the quarter, like Q3 2026-27> plan · <its status>** · <their designation> ·"
         " <their project> [cite this result once]",
         "",
-        "  *<only if something is missing: timesheet notes, project facts, a guide or their"
-        " designation's part of it, in one short line; say preliminary if what is known is"
-        " thin>*",
+        "  <two short sentences, said naturally, as a mentor would: why these three — what in"
+        " their project, plan or role they come from — then anything missing (timesheet"
+        " notes, project facts, a guide or their designation's part of it), saying"
+        " preliminary if what is known is thin>",
         "",
         "  **1. <the objective: one actionable goal, at most 8 words>** — <weightage>%",
         f"  - KPI: {kpi}, at most 12 words",
