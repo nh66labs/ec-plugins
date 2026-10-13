@@ -171,7 +171,7 @@ def _bindable(node: Any, path: str = "arguments") -> list[str]:
 READS = {
     "get_holidays", "get_my_leave_balance", "list_my_leaves", "get_leave_context",
     "preview_leave", "list_leave_requests_to_decide", "start_leave_request",
-    "get_leave_request_impact",
+    "get_leave_request_impact", "get_leave_trend",
     "get_my_mbo_context", "get_my_mbo_plan",
 }
 WRITES = {"apply_leave", "cancel_my_leave", "approve_leave", "reject_leave", "save_my_mbo_plan"}
@@ -855,3 +855,197 @@ def test_the_instructions_ask_for_every_answer_to_cite_its_result() -> None:
     said = " ".join(INSTRUCTIONS.split())
     assert "cites the result it came from by its number, like [1]" in said
     assert "a list of holidays or balances too" in said
+
+
+# --- an HRMS admin asks about someone's leave trend ---------------------------------
+
+ANU = {"id": "emp-7", "name": "Anu Thomas", "employee_id": "H032",
+       "company_email": "anu@acme.test"}
+ANUSREE = {"id": "emp-8", "name": "Anusree P", "employee_id": "H101",
+           "company_email": "anusree@acme.test"}
+
+
+def _as(hrms: FakeHrms, role: str) -> None:
+    hrms.results["get_user_session"] = {
+        **hrms.results["get_user_session"], "role": role, "employee_id": "emp-0042",
+        "employee_code": "H001", "company_email": "ravi@acme.test",
+        "current_date": "2026-10-13",
+    }
+
+
+def _anus_leave(hrms: FakeHrms, owner: str = "emp-7") -> None:
+    hrms.results["resolve_employee"] = [ANU]
+    hrms.results["get_holidays"] = [{"date": "2026-10-01", "name": "Holiday", "type": "Public"}]
+    hrms.results["get_leave_balance"] = [
+        {"type": "Casual Leave", "total_quota": 12, "used": 8, "available": 4},
+    ]
+    hrms.results["get_leaves"] = [
+        {"id": f"lv-{n}", "employee_id": owner, "leave_type": kind, "leave_mode": "Full Day",
+         "leave_date_from": day, "leave_date_to": day, "status": "Approved", "value": 1,
+         "reason": "hospital visit"}
+        for n, (kind, day) in enumerate([
+            ("Sick Leave", "2026-06-08"), ("Sick Leave", "2026-08-03"),
+            ("Sick Leave", "2026-09-07"), ("Casual Leave", "2026-05-22"),
+            ("Floating Leave", "2026-10-02"),
+        ])
+    ]
+
+
+def _called(hrms: FakeHrms, name: str) -> list[dict[str, Any]]:
+    return [c["arguments"] for c in hrms.calls() if c["name"] == name]
+
+
+def test_an_hrms_admin_is_given_the_trend_of_the_person_named(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    _as(hrms, "admin")
+    _anus_leave(hrms)
+    said = text(call(client, "get_leave_trend", {"employee": "Anu"}))
+    assert said.startswith(
+        "Anu Thomas (H032) — leave from Mon 13 Apr 2026 to Tue 13 Oct 2026 (the last 6 months)."
+    )
+    assert "Leave taken: 5 days, approved leave only." in said
+    assert "Balance now: Casual leave 4 of 12 left." in said
+    assert "- Single-day sick leave on a Monday 3 times: 8 Jun, 3 Aug, 7 Sep." in said
+    # Their leave, asked for by their id; their holidays for every year counted.
+    assert _called(hrms, "get_leaves") == [{"employee_id": "emp-7"}]
+    assert _called(hrms, "get_leave_balance") == [{"employee_id": "emp-7"}]
+    assert {a["year"] for a in _called(hrms, "get_holidays")} == {"2025", "2026"}
+
+
+def test_a_trend_never_carries_a_reason_or_an_id(client: TestClient, hrms: FakeHrms) -> None:
+    _as(hrms, "admin")
+    _anus_leave(hrms)
+    said = text(call(client, "get_leave_trend", {"employee": "Anu"}))
+    assert "hospital" not in said
+    assert "lv-" not in said and "emp-7" not in said
+
+
+@pytest.mark.parametrize("role", ["employee", "project_manager"])
+def test_anyone_but_an_admin_asking_about_someone_else_is_refused_before_the_hrms(
+    client: TestClient, hrms: FakeHrms, role: str
+) -> None:
+    _as(hrms, role)
+    _anus_leave(hrms)
+    said = text(call(client, "get_leave_trend", {"employee": "Anu"}))
+    assert said == "Only an HRMS administrator can look at another employee's leave pattern."
+    assert _called(hrms, "get_leaves") == []
+    assert _called(hrms, "resolve_employee") == []
+
+
+@pytest.mark.parametrize("meant", ["me", "Ravi", "h001", "RAVI@acme.test"])
+def test_anyone_may_ask_about_their_own(client: TestClient, hrms: FakeHrms, meant: str) -> None:
+    _as(hrms, "employee")
+    _anus_leave(hrms, owner="emp-0042")
+    said = text(call(client, "get_leave_trend", {"employee": meant}))
+    assert said.startswith("Ravi (H001) — leave from")
+    assert _called(hrms, "get_leaves") == [{"employee_id": "emp-0042"}]
+    assert _called(hrms, "resolve_employee") == []
+
+
+def test_leave_that_is_not_the_persons_is_never_shown_as_theirs(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    _as(hrms, "admin")
+    _anus_leave(hrms, owner="emp-0042")  # the HRMS answered with the asker's own
+    result = call(client, "get_leave_trend", {"employee": "Anu"})
+    assert result["isError"] is True
+    assert "not this person's" in text(result)
+    assert "Anu Thomas" not in text(result)
+
+
+def test_several_matches_are_asked_about_by_name_and_code(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    _as(hrms, "admin")
+    _anus_leave(hrms)
+    hrms.results["resolve_employee"] = [ANU, ANUSREE]
+    said = text(call(client, "get_leave_trend", {"employee": "Anu"}))
+    assert said.startswith('Several people match "Anu": Anu Thomas (H032), Anusree P (H101).')
+    assert _called(hrms, "get_leaves") == []
+
+
+@pytest.mark.parametrize("meant", ["anu thomas", "H032", "anu@acme.test"])
+def test_an_exact_name_code_or_email_wins_over_a_partial_match(
+    client: TestClient, hrms: FakeHrms, meant: str
+) -> None:
+    _as(hrms, "admin")
+    _anus_leave(hrms)
+    hrms.results["resolve_employee"] = [ANU, ANUSREE]
+    said = text(call(client, "get_leave_trend", {"employee": meant}))
+    assert said.startswith("Anu Thomas (H032) — leave from")
+
+
+def test_nobody_matching_is_said_plainly(client: TestClient, hrms: FakeHrms) -> None:
+    _as(hrms, "admin")
+    hrms.errors["resolve_employee"] = "no employee found matching: Zed"
+    said = text(call(client, "get_leave_trend", {"employee": "Zed"}))
+    assert said == 'The HRMS has no employee matching "Zed".'
+
+
+def test_the_named_period_is_counted_from_the_hrms_today(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    _as(hrms, "admin")
+    _anus_leave(hrms)
+    said = text(call(client, "get_leave_trend", {"employee": "Anu", "period": "last quarter"}))
+    assert said.startswith(
+        "Anu Thomas (H032) — leave from Wed 1 Jul 2026 to Wed 30 Sep 2026 (last quarter)."
+    )
+
+
+def test_a_period_that_cannot_be_counted_reaches_no_leave(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    _as(hrms, "admin")
+    _anus_leave(hrms)
+    result = call(client, "get_leave_trend",
+                  {"employee": "Anu", "period": "between dates", "date_from": "2020-01-01"})
+    assert result["isError"] is True
+    assert "at most 24 months" in text(result)
+    assert _called(hrms, "get_leaves") == []
+
+
+def test_a_balance_the_hrms_will_not_give_leaves_the_trend(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    _as(hrms, "admin")
+    _anus_leave(hrms)
+    hrms.errors["get_leave_balance"] = "balance unavailable"
+    said = text(call(client, "get_leave_trend", {"employee": "Anu"}))
+    assert "Leave taken: 5 days" in said
+    assert "Balance now" not in said
+
+
+def test_the_trend_tells_the_assistant_to_say_only_what_it_counted(client: TestClient) -> None:
+    tools = {t["name"]: t for t in rpc(client, "tools/list").json()["result"]["tools"]}
+    told = " ".join(tools["get_leave_trend"]["description"].split())
+    for rule in ("never suggest a reason, a health matter, a motive",
+                 "never compare them with other employees",
+                 'never "he" or "she"',
+                 "last six months, with its dates",
+                 "shown the result as cards"):
+        assert rule in told
+
+
+def test_the_trend_is_laid_out_as_two_cards(client: TestClient, hrms: FakeHrms) -> None:
+    _as(hrms, "admin")
+    _anus_leave(hrms)
+    result = call(client, "get_leave_trend", {"employee": "Anu"})
+    figures, months = result["_meta"]["ec/blocks"]
+    assert figures["type"] == "metrics" and months["type"] == "table"
+    assert figures["title"] == "Leave trend · Anu Thomas (H032)"
+    assert figures["subtitle"].startswith("13 Apr – 13 Oct 2026 · Mostly single days")
+    fields = {f["label"]: f["value"] for f in figures["fields"]}
+    assert fields["Leave taken"] == "5 days" and fields["Casual leave left"] == "4 of 12"
+    assert months["rows"][-1]["cells"][0] == "Total"
+    # Counted, not reasoned about: the reason never reaches a card either.
+    assert "hospital" not in json.dumps(result["_meta"])
+
+
+@pytest.mark.parametrize("role", ["employee", "project_manager"])
+def test_a_refusal_carries_no_card(client: TestClient, hrms: FakeHrms, role: str) -> None:
+    _as(hrms, role)
+    _anus_leave(hrms)
+    result = call(client, "get_leave_trend", {"employee": "Anu"})
+    assert not (result.get("_meta") or {}).get("ec/blocks")

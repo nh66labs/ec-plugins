@@ -23,6 +23,10 @@ docker compose exec runner python -m app.evals run /tmp/employee-cases.json \
 docker compose cp manager-cases.json runner:/tmp/manager-cases.json
 docker compose exec runner python -m app.evals run /tmp/manager-cases.json \
     --space "SPACE NAME" --as PROJECT.MANAGER@EMAIL --repeat 3
+
+docker compose cp hr-cases.json runner:/tmp/hr-cases.json
+docker compose exec runner python -m app.evals run /tmp/hr-cases.json \
+    --space "SPACE NAME" --as HRMS.ADMIN@EMAIL --repeat 3
 ```
 
 Compare two runs with `python -m app.evals compare BEFORE.json AFTER.json`.
@@ -34,4 +38,10 @@ Compare two runs with `python -m app.evals compare BEFORE.json AFTER.json`.
   person); a balance of casual leave; next Tuesday free of their own leave and
   of holidays.
 - **manager-cases**: at least one request waiting on the manager.
+- **hr-cases**: asked as an HRMS administrator; exactly one employee whose name
+  contains "Navaneeth", with some approved leave in the last six months and the
+  last quarter (change the name for another HRMS). Graded on what is never said
+  — a reason, a motive, a judgement — since the figures change with the data.
+- **employee-cases**' `trend-of-a-colleague-is-refused`: the employee is not an
+  HRMS administrator, and "Dev User" is someone else.
 - Dates are not checked: "next Friday" is worked out on the day of the run.
