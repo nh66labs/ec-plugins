@@ -736,9 +736,10 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
               for year in range(first.year, last.year + 1)),
         )
         records = [r for r in records or [] if isinstance(r, dict)]
-        if any(str(r.get("employee_id") or "") != target for r in records):
+        if any(str(r.get("employee_id") or target) != target for r in records):
             # Only ever the person asked about: leave of anyone else, under
-            # their name, would be worse than no answer.
+            # their name, would be worse than no answer. A record that names no
+            # one is the answer to asking for this person's leave.
             raise ToolError(
                 "The HRMS returned leave that is not this person's, so no trend is given. "
                 "Tell the person it could not be checked right now."

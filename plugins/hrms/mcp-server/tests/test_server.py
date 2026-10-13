@@ -954,6 +954,18 @@ def test_leave_that_is_not_the_persons_is_never_shown_as_theirs(
     assert "Anu Thomas" not in text(result)
 
 
+def test_leave_that_names_no_one_is_the_persons_asked_about(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    _as(hrms, "admin")
+    _anus_leave(hrms)
+    for record in hrms.results["get_leaves"]:
+        del record["employee_id"]
+    said = text(call(client, "get_leave_trend", {"employee": "Anu"}))
+    assert said.startswith("Anu Thomas (H032) — leave from")
+    assert "Leave taken: 5 days, approved leave only." in said
+
+
 def test_several_matches_are_asked_about_by_name_and_code(
     client: TestClient, hrms: FakeHrms
 ) -> None:
