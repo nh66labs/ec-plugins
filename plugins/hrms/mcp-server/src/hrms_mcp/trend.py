@@ -484,14 +484,16 @@ def lines(trend: Trend, who: str, balance: str = "") -> list[str]:
         f"{who} — leave from {_day(span.start)} to {_day(span.end)} ({span.label}).",
         f"Pattern: {pattern_line(trend)}",
     ]
+    # Leave taken, its change and the long breaks are written even at none, so
+    # the card the assistant copies them into keeps its tiles (EC-D274).
     total = sum(trend.requests.values())
     if total == 0:
-        out.append("No leave requests in this period.")
+        out.append("Requests: 0 — no leave requests in this period.")
     else:
         parts = [f"{trend.requests[s]} {s.lower()}" for s in STATUSES if trend.requests[s]]
-        out.append(f"Requests: {total} — {', '.join(parts)}.")
-        out.append(f"Leave taken: {_days(trend.days)}, approved leave only.")
-        out.append(f"Change: {_change(trend)}.")
+        out.append(f"Requests: {total} — {' · '.join(parts)}.")
+    out.append(f"Leave taken: {_days(trend.days)}, approved leave only.")
+    out.append(f"Change: {_change(trend)}.")
     if trend.by_type:
         out.append("By type: " + " · ".join(
             f"{kind} {_days(days)} ({count} request{'' if count == 1 else 's'})"
@@ -521,6 +523,8 @@ def lines(trend: Trend, who: str, balance: str = "") -> list[str]:
     if trend.long_breaks:
         out.append(f"Long breaks: {len(trend.long_breaks)} — "
                    + " · ".join(_break(b) for b in trend.long_breaks) + ".")
+    else:
+        out.append("Long breaks: 0.")
     if trend.upcoming:
         shown = trend.upcoming[:UPCOMING_LIMIT]
         more = len(trend.upcoming) - len(shown)
@@ -585,8 +589,14 @@ def _month_types(trend: Trend, month: date) -> str:
         ((kind, days) for (m, kind), days in trend.by_month_type.items() if m == month and days),
         key=lambda item: -item[1],
     )
-    said = ", ".join(f"{kind} {days:g}" for kind, days in kinds) or "none"
+    said = ", ".join(f"{short_kind(kind)} {days:g}" for kind, days in kinds) or "none"
     return f"{name} {said}"
+
+
+def short_kind(kind: str) -> str:
+    """"Casual leave" → "Casual": short enough for a card's column or note."""
+    words = kind.split()
+    return " ".join(words[:-1]) if len(words) > 1 and words[-1].lower() == "leave" else kind
 
 
 def _change(trend: Trend) -> str:

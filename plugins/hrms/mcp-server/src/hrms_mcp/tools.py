@@ -698,15 +698,17 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
         · " and the person as the first line names them, subtitled the period's
         dates, " · ", then the Pattern line; its fields in this order: "Leave
         taken" (the days; note the Change line), "Requests" (the number, format
-        number; note the counts by status joined with " · "), "Monday or Friday"
+        number; note the counts by status as written), "Monday or Friday"
         (value like "6/11.5"; note "days · about 4.6 if spread evenly"), "Long
         breaks" (the number, format number; note "3+ days off around a weekend
         or holiday"), "Leave left" (value like "10.5/25"; note "days · " then the
         types as written). Leave out a field whose line the result does not
         have. Second, when "By month and type" names two months or more, a table
-        titled "By month": columns Month, one a leave type taken, then Total
-        (format number); a row a month as named there, "–" for none, the month's
-        total from "By month", then a Total row. Then write one sentence naming
+        titled "By month": columns Month, one a leave type taken as named
+        there, then Total (format number); a row a month as named there, "–"
+        for none, the month's total from "By month"; then a Total row of each
+        type's days from "By type" and the days from "Leave taken" — never add
+        a column up yourself. Then write one sentence naming
         the person and the period, then the Notable lines as short sentences,
         then upcoming leave in one line — never the cards' figures again."""
         session = await _ask(hrms, ctx, "get_user_session", {})
@@ -851,14 +853,9 @@ def _balance_line(balances: list[Balance]) -> str:
         return ""
     left = sum(b[1] for b in balances)
     quota = sum(b[2] for b in balances)
-    parts = [f"{_short_kind(kind)} {available:g}/{total:g}" for kind, available, total in balances]
+    parts = [f"{trend.short_kind(kind)} {have:g}/{total:g}" for kind, have, total in balances]
     return f"Leave left now: {left:g}/{quota:g} days — " + " · ".join(parts) + "."
 
-
-def _short_kind(kind: str) -> str:
-    """"Casual leave" → "Casual": short enough for a card's note."""
-    words = kind.split()
-    return " ".join(words[:-1]) if len(words) > 1 and words[-1].lower() == "leave" else kind
 
 
 #: The requests a manager may ask about: one still to decide, or one already

@@ -97,8 +97,8 @@ def test_the_result_writes_each_figure_as_the_card_shows_it() -> None:
     assert "Monday or Friday: 6/7.5 days; about 3.0 if spread evenly." in out
     assert any(line.startswith("Long breaks: 6 — 22 May") for line in out)
     assert (
-        "By month and type: Apr none · May Casual leave 1 · Jun Sick leave 1.5 · Jul none · "
-        "Aug Sick leave 1 · Sep Casual leave 2, Sick leave 1 · Oct (so far) Floating leave 1."
+        "By month and type: Apr none · May Casual 1 · Jun Sick 1.5 · Jul none · "
+        "Aug Sick 1 · Sep Casual 2, Sick 1 · Oct (so far) Floating 1."
     ) in out
 
 
@@ -114,5 +114,5 @@ def test_the_same_or_fewer_days_than_before_is_said_so() -> None:
 def test_months_across_two_years_carry_the_year() -> None:
     out = trend.lines(six_months(HISTORY, "last 12 months"), "A")
     line = next(line for line in out if line.startswith("By month and type: "))
-    assert line.startswith("By month and type: Oct 2025 none · Nov 2025 Casual leave 1 · ")
-    assert line.endswith("Oct 2026 (so far) Floating leave 1.")
+    assert line.startswith("By month and type: Oct 2025 none · Nov 2025 Casual 1 · ")
+    assert line.endswith("Oct 2026 (so far) Floating 1.")

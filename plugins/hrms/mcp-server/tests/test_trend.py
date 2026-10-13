@@ -303,7 +303,7 @@ def test_the_lines_state_the_period_first_and_the_notable_last() -> None:
     out = trend.lines(found, "Anu Thomas (H032)", balance=left)
     assert out[0] == ("Anu Thomas (H032) — leave from Mon 13 Apr 2026 to Tue 13 Oct 2026 "
                       "(the last 6 months).")
-    assert "Requests: 7 — 6 approved, 1 rejected." in out
+    assert "Requests: 7 — 6 approved · 1 rejected." in out
     assert "Leave taken: 7 days, approved leave only." in out
     assert ("By type: Casual leave 3 days (2 requests) · Sick leave 3 days (3 requests) · "
             "Floating leave 1 day (1 request).") in out
@@ -324,6 +324,10 @@ def test_the_lines_state_the_period_first_and_the_notable_last() -> None:
 
 def test_a_period_with_no_leave_says_so() -> None:
     out = trend.lines(six_months([]), "Anu Thomas (H032)")
-    assert "No leave requests in this period." in out
+    assert "Requests: 0 — no leave requests in this period." in out
+    # Written at none, so the card keeps its tiles (EC-D274).
+    assert "Leave taken: 0 days, approved leave only." in out
+    assert "Change: the same as the time before." in out
+    assert "Long breaks: 0." in out
     assert not any(line.startswith(("By month", "Weekdays")) for line in out)
     assert out[-1] == "- Too few leave days in this period to show a pattern."

@@ -1037,7 +1037,8 @@ def test_the_trend_tells_the_assistant_to_say_only_what_it_counted(client: TestC
                  'never "he" or "she"',
                  "last six months, with its dates",
                  "lay it out with present",
-                 "copying every figure exactly as the result writes it"):
+                 "copying every figure exactly as the result writes it",
+                 "never add a column up yourself"):
         assert rule in told
 
 
