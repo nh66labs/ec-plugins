@@ -905,7 +905,7 @@ def test_an_hrms_admin_is_given_the_trend_of_the_person_named(
         "Anu Thomas (H032) — leave from Mon 13 Apr 2026 to Tue 13 Oct 2026 (the last 6 months)."
     )
     assert "Leave taken: 5 days, approved leave only." in said
-    assert "Balance now: Casual leave 4 of 12 left." in said
+    assert "Leave left now: 4/12 days — Casual 4/12." in said
     assert "- Single-day sick leave on a Monday 3 times: 8 Jun, 3 Aug, 7 Sep." in said
     # Their leave, asked for by their id; their holidays for every year counted.
     assert _called(hrms, "get_leaves") == [{"employee_id": "emp-7"}]
@@ -1026,7 +1026,7 @@ def test_a_balance_the_hrms_will_not_give_leaves_the_trend(
     hrms.errors["get_leave_balance"] = "balance unavailable"
     said = text(call(client, "get_leave_trend", {"employee": "Anu"}))
     assert "Leave taken: 5 days" in said
-    assert "Balance now" not in said
+    assert "Leave left now" not in said
 
 
 def test_the_trend_tells_the_assistant_to_say_only_what_it_counted(client: TestClient) -> None:
@@ -1036,23 +1036,24 @@ def test_the_trend_tells_the_assistant_to_say_only_what_it_counted(client: TestC
                  "never compare them with other employees",
                  'never "he" or "she"',
                  "last six months, with its dates",
-                 "shown the result as cards"):
+                 "lay it out with present",
+                 "copying every figure exactly as the result writes it",
+                 "never add a column up yourself"):
         assert rule in told
 
 
-def test_the_trend_is_laid_out_as_two_cards(client: TestClient, hrms: FakeHrms) -> None:
+def test_the_trend_sends_no_card_of_its_own(client: TestClient, hrms: FakeHrms) -> None:
+    """The assistant lays the trend out with present (EC-D274): the result is
+    words only, carrying every figure the card copies."""
     _as(hrms, "admin")
     _anus_leave(hrms)
     result = call(client, "get_leave_trend", {"employee": "Anu"})
-    figures, months = result["_meta"]["ec/blocks"]
-    assert figures["type"] == "metrics" and months["type"] == "table"
-    assert figures["title"] == "Leave trend · Anu Thomas (H032)"
-    assert figures["subtitle"].startswith("13 Apr – 13 Oct 2026 · Mostly single days")
-    fields = {f["label"]: f["value"] for f in figures["fields"]}
-    assert fields["Leave taken"] == "5 days" and fields["Casual leave left"] == "4 of 12"
-    assert months["rows"][-1]["cells"][0] == "Total"
-    # Counted, not reasoned about: the reason never reaches a card either.
-    assert "hospital" not in json.dumps(result["_meta"])
+    assert not (result.get("_meta") or {}).get("ec/blocks")
+    said = text(result)
+    assert said.splitlines()[1].startswith("Pattern: Mostly single days")
+    for figure in ("Change: ", "Monday or Friday: ", "By month and type: ", "Leave left now: "):
+        assert figure in said
+    assert "hospital" not in said
 
 
 @pytest.mark.parametrize("role", ["employee", "project_manager"])

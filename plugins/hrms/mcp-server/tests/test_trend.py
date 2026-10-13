@@ -299,10 +299,11 @@ def test_the_lines_state_the_period_first_and_the_notable_last() -> None:
         leave("2026-10-26"),
         leave("2025-11-05"),
     ])
-    out = trend.lines(found, "Anu Thomas (H032)", balance="Balance now: Casual leave 4 of 12.")
+    left = "Leave left now: 4/12 days — Casual 4/12."
+    out = trend.lines(found, "Anu Thomas (H032)", balance=left)
     assert out[0] == ("Anu Thomas (H032) — leave from Mon 13 Apr 2026 to Tue 13 Oct 2026 "
                       "(the last 6 months).")
-    assert "Requests: 7 — 6 approved, 1 rejected." in out
+    assert "Requests: 7 — 6 approved · 1 rejected." in out
     assert "Leave taken: 7 days, approved leave only." in out
     assert ("By type: Casual leave 3 days (2 requests) · Sick leave 3 days (3 requests) · "
             "Floating leave 1 day (1 request).") in out
@@ -310,11 +311,11 @@ def test_the_lines_state_the_period_first_and_the_notable_last() -> None:
     assert "By quarter: Apr–Jun 2 from 13 Apr · Jul–Sep 4 · Oct–Dec 1 so far." in out
     assert "Weekdays: Mon 4 · Tue 1 · Wed 0 · Thu 0 · Fri 2." in out
     assert ("Before: 1 day in 1 request from Mon 13 Oct 2025 to Sun 12 Apr 2026.") in out
-    assert any(line.startswith("Long breaks: 22 May (Fri 22 May–Sun 24 May, 3 days off)")
+    assert any(line.startswith("Long breaks: 6 — 22 May (Fri 22 May–Sun 24 May, 3 days off)")
                and "2 Oct, a bridge day (Thu 1 Oct–Sun 4 Oct, 4 days off)" in line
                for line in out)
     assert "Upcoming, not counted: Casual leave Mon 26 Oct 2026, approved." in out
-    assert out.index("Balance now: Casual leave 4 of 12.") < out.index("Notable:")
+    assert out.index(left) < out.index("Notable:")
     notable = out[out.index("Notable:") + 1:]
     assert "- Single-day sick leave on a Monday 3 times: 8 Jun, 3 Aug, 7 Sep." in notable
     assert "- 6 of 7 leave days were on a Monday or Friday; an even spread would be about 2.8." \
@@ -323,6 +324,10 @@ def test_the_lines_state_the_period_first_and_the_notable_last() -> None:
 
 def test_a_period_with_no_leave_says_so() -> None:
     out = trend.lines(six_months([]), "Anu Thomas (H032)")
-    assert "No leave requests in this period." in out
+    assert "Requests: 0 — no leave requests in this period." in out
+    # Written at none, so the card keeps its tiles (EC-D274).
+    assert "Leave taken: 0 days, approved leave only." in out
+    assert "Change: the same as the time before." in out
+    assert "Long breaks: 0." in out
     assert not any(line.startswith(("By month", "Weekdays")) for line in out)
     assert out[-1] == "- Too few leave days in this period to show a pattern."
