@@ -42,6 +42,9 @@ Compare two runs with `python -m app.evals compare BEFORE.json AFTER.json`.
   contains "Navaneeth", with some approved leave in the last six months and the
   last quarter (change the name for another HRMS). Graded on what is never said
   — a reason, a motive, a judgement — since the figures change with the data.
+  `trend-is-laid-out-as-a-card` also needs leave in two months or more of the
+  last twelve, and checks the card's fixed labels, not its figures: compare
+  those with the result by hand.
 - **employee-cases**' `trend-of-a-colleague-is-refused`: the employee is not an
   HRMS administrator, and "Dev User" is someone else.
 - Dates are not checked: "next Friday" is worked out on the day of the run.

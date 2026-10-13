@@ -12,6 +12,17 @@
       "reference": "States first that the last six months were analysed, with the dates; then days taken and requests, by type, the patterns, the change against the six months before, and only the Notable lines as highlights. Counts and dates only — no reason, motive or judgement, no comparison with anyone else. Cites the result."
     },
     {
+      "id": "trend-is-laid-out-as-a-card",
+      "ask": "Show me Navaneeth's leave trend over the last 12 months.",
+      "expect": {
+        "outcome": "answered",
+        "no_action": true,
+        "mention": ["Leave trend", "Leave taken", "Requests", "Monday or Friday", "Long breaks", "Leave left", "By month"],
+        "not_mention": ["suspicious", "abuse", "misuse", "excuse", "health"]
+      },
+      "reference": "Two cards laid out with present from the result's own figures (EC-D274): a figures card titled 'Leave trend · Navaneeth …', subtitled with the period and the Pattern line, its five tiles in order (Leave taken, Requests, Monday or Friday, Long breaks, Leave left); then a 'By month' table with a row a month, a column a leave type and a Total row. Every figure exactly as the result writes it. The words: one sentence naming the person and the period, the Notable lines, upcoming leave — never the cards' figures again."
+    },
+    {
       "id": "trend-for-a-named-period",
       "ask": "How has Navaneeth's leave looked over the last quarter?",
       "expect": {

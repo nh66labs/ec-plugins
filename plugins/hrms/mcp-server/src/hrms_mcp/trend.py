@@ -491,6 +491,7 @@ def lines(trend: Trend, who: str, balance: str = "") -> list[str]:
         parts = [f"{trend.requests[s]} {s.lower()}" for s in STATUSES if trend.requests[s]]
         out.append(f"Requests: {total} — {', '.join(parts)}.")
         out.append(f"Leave taken: {_days(trend.days)}, approved leave only.")
+        out.append(f"Change: {_change(trend)}.")
     if trend.by_type:
         out.append("By type: " + " · ".join(
             f"{kind} {_days(days)} ({count} request{'' if count == 1 else 's'})"
@@ -499,19 +500,27 @@ def lines(trend: Trend, who: str, balance: str = "") -> list[str]:
     if trend.days:
         out.append("By month: " + " · ".join(_month_part(trend, m, d) for m, d in trend.by_month)
                    + ".")
+        out.append("By month and type: " + " · ".join(
+            _month_types(trend, m) for m, _ in trend.by_month
+        ) + ".")
         quarters = _quarters(trend)
         if len(quarters) > 1:
             out.append("By quarter: " + " · ".join(quarters) + ".")
         out.append("Weekdays: " + " · ".join(
             f"{name} {trend.by_weekday[name]:g}" for name in WEEKDAYS
         ) + ".")
+        out.append(
+            f"Monday or Friday: {trend.edge_days:g}/{trend.days:g} days; about "
+            f"{trend.days * EVEN_EDGE_SHARE:.1f} if spread evenly."
+        )
     out.append(
         f"Before: {_days(trend.days_before)} in {trend.requests_before} "
         f"request{'' if trend.requests_before == 1 else 's'} from {_day(span.before_start)} "
         f"to {_day(span.before_end)}."
     )
     if trend.long_breaks:
-        out.append("Long breaks: " + " · ".join(_break(b) for b in trend.long_breaks) + ".")
+        out.append(f"Long breaks: {len(trend.long_breaks)} — "
+                   + " · ".join(_break(b) for b in trend.long_breaks) + ".")
     if trend.upcoming:
         shown = trend.upcoming[:UPCOMING_LIMIT]
         more = len(trend.upcoming) - len(shown)
@@ -564,6 +573,28 @@ def _month_part(trend: Trend, month: date, days: float) -> str:
     name = f"{month:%b %Y}" if several_years else f"{month:%b}"
     last = add_months(month, 1) - timedelta(days=1)
     return f"{name} {days:g}{_so_far(trend, last)}"
+
+
+def _month_types(trend: Trend, month: date) -> str:
+    """A month and its days by leave type, for the model's month table: "Jun
+    Sick 1, Casual 0.5" — or "none"."""
+    name = f"{month:%b %Y}" if trend.span.start.year != trend.span.end.year else f"{month:%b}"
+    if _so_far(trend, add_months(month, 1) - timedelta(days=1)):
+        name += " (so far)"
+    kinds = sorted(
+        ((kind, days) for (m, kind), days in trend.by_month_type.items() if m == month and days),
+        key=lambda item: -item[1],
+    )
+    said = ", ".join(f"{kind} {days:g}" for kind, days in kinds) or "none"
+    return f"{name} {said}"
+
+
+def _change(trend: Trend) -> str:
+    """Days taken against the same length of time before, as the card's note says it."""
+    before = trend.days_before
+    if trend.days == before:
+        return "the same as the time before"
+    return f"{'up' if trend.days > before else 'down'} from {_days(before)} before"
 
 
 def _quarters(trend: Trend) -> list[str]:

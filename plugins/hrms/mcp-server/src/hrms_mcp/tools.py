@@ -25,7 +25,7 @@ from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
-from hrms_mcp import trend, trend_cards, workload
+from hrms_mcp import trend, workload
 from hrms_mcp.hrms import Hrms, HrmsError
 from hrms_mcp.jira import Jira, project_keys
 
@@ -692,10 +692,23 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
         each sentence that uses it. Leave reasons are not given; do not look for
         them elsewhere.
 
-        When you are told the person is shown the result as cards, they already
-        see every figure and the pattern line: write one sentence naming the
-        person and the period, then the Notable lines as short sentences, then
-        upcoming leave in one line — nothing else from the result."""
+        When the result is a trend (not a refusal or a question of who), lay it
+        out with present, copying every figure exactly as the result writes it —
+        never count, round or reword one. First a metrics card titled "Leave trend
+        · " and the person as the first line names them, subtitled the period's
+        dates, " · ", then the Pattern line; its fields in this order: "Leave
+        taken" (the days; note the Change line), "Requests" (the number, format
+        number; note the counts by status joined with " · "), "Monday or Friday"
+        (value like "6/11.5"; note "days · about 4.6 if spread evenly"), "Long
+        breaks" (the number, format number; note "3+ days off around a weekend
+        or holiday"), "Leave left" (value like "10.5/25"; note "days · " then the
+        types as written). Leave out a field whose line the result does not
+        have. Second, when "By month and type" names two months or more, a table
+        titled "By month": columns Month, one a leave type taken, then Total
+        (format number); a row a month as named there, "–" for none, the month's
+        total from "By month", then a Total row. Then write one sentence naming
+        the person and the period, then the Notable lines as short sentences,
+        then upcoming leave in one line — never the cards' figures again."""
         session = await _ask(hrms, ctx, "get_user_session", {})
         if not isinstance(session, dict) or not session.get("employee_id"):
             raise ToolError("The HRMS could not say who is asking, so no trend is given.")
@@ -705,11 +718,8 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
         except ValueError as error:
             raise ToolError(str(error)) from None
 
-        def said(text: str, cards: list[dict[str, Any]] | None = None) -> CallToolResult:
-            return CallToolResult(
-                content=[TextContent(type="text", text=text)],
-                _meta={trend_cards.BLOCKS_META: cards} if cards else None,
-            )
+        def said(text: str) -> CallToolResult:
+            return CallToolResult(content=[TextContent(type="text", text=text)])
 
         if _is_self(session, employee):
             person: dict[str, Any] | str = {
@@ -749,10 +759,7 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
         )
         found = trend.summarise(trend.leaves_of(records, kind_of), holidays, span, today)
         who = _person_label(person)
-        return said(
-            "\n".join(trend.lines(found, who, balance=_balance_line(balances))),
-            trend_cards.cards(found, who, balances),
-        )
+        return said("\n".join(trend.lines(found, who, balance=_balance_line(balances))))
 
 
 NOT_AN_ADMIN = "Only an HRMS administrator can look at another employee's leave pattern."
@@ -818,7 +825,7 @@ async def _person_meant(hrms: Hrms, ctx: Context, employee: str) -> dict[str, An
 CHOICES_LIMIT = 8
 
 
-async def _balances(hrms: Hrms, ctx: Context, employee_id: str) -> list[trend_cards.Balance]:
+async def _balances(hrms: Hrms, ctx: Context, employee_id: str) -> list[Balance]:
     """Their balance now, a leave type at a time — or none: a trend is still
     worth giving when the balance cannot be read."""
     try:
@@ -833,9 +840,25 @@ async def _balances(hrms: Hrms, ctx: Context, employee_id: str) -> list[trend_ca
     ]
 
 
-def _balance_line(balances: list[trend_cards.Balance]) -> str:
-    parts = [f"{kind} {available:g} of {quota:g} left" for kind, available, quota in balances]
-    return "Balance now: " + " · ".join(parts) + "." if parts else ""
+#: A balance as the HRMS gives it: the leave type, days available, the quota.
+Balance = tuple[str, float, float]
+
+
+def _balance_line(balances: list[Balance]) -> str:
+    """The days left of every type's quota, together and by type, as the card
+    shows them: "Leave left now: 10.5/25 days — Casual 3/12 · Sick 7.5/12"."""
+    if not balances:
+        return ""
+    left = sum(b[1] for b in balances)
+    quota = sum(b[2] for b in balances)
+    parts = [f"{_short_kind(kind)} {available:g}/{total:g}" for kind, available, total in balances]
+    return f"Leave left now: {left:g}/{quota:g} days — " + " · ".join(parts) + "."
+
+
+def _short_kind(kind: str) -> str:
+    """"Casual leave" → "Casual": short enough for a card's note."""
+    words = kind.split()
+    return " ".join(words[:-1]) if len(words) > 1 and words[-1].lower() == "leave" else kind
 
 
 #: The requests a manager may ask about: one still to decide, or one already
