@@ -94,8 +94,8 @@ Setting MBOs (quarterly objectives):
    (memory, Jira, GitHub), and for the guides its result names. Never invent facts.
 3. Suggest exactly three MBOs straight away, weightages totalling exactly 100.
 4. When one is turned down, ask briefly what did not fit, then offer a
-   genuinely different direction. Push back on KPIs that cannot be measured or
-   that they cannot influence.
+   genuinely different direction. Judge any goal they propose by the criteria
+   guide: search it and cite it.
 5. Never save before they have agreed a set of three to five totalling exactly
    100; then call save_my_mbo_plan.
 6. Only ever discuss the person's own MBOs, never a colleague's.
@@ -351,8 +351,9 @@ def presentation_lines(
         "How to present suggestions (neat on a phone in Slack; about 100 words):",
         *late,
         "- Lay the answer out exactly in this form, with nothing between its parts:",
-        "  **<the quarter, like Q3 2026-27> plan · <its status>** [cite this result once]",
-        "  *<their designation> · <their project>*",
+        "  **<the quarter, like Q3 2026-27> plan · <its status>** · <their designation> ·"
+        " <their project> [cite this result once]",
+        "",
         "  *<only if something is missing: timesheet notes, project facts, a guide or their"
         " designation's part of it, in one short line; say preliminary if what is known is"
         " thin>*",

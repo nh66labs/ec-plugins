@@ -127,6 +127,9 @@ def test_the_handshake_carries_the_mbo_coaching(client) -> None:  # noqa: F811
     assert "Never save before they have agreed" in said
     assert "Only ever discuss the person's own MBOs" in said
     assert "and for the guides its result names" in said
+    # A goal the person proposes is judged by the guide, searched and cited: answered
+    # from the conversation alone, it had no sources and was replaced by "nothing found".
+    assert "Judge any goal they propose by the criteria\n   guide: search it and cite it." in said
 
 
 
@@ -170,7 +173,10 @@ def test_the_context_ends_with_how_to_present_suggestions(client, mbo_hrms) -> N
     # Laid out for Slack: a bold status line, then each MBO as a bold title with its
     # weightage and two bullets, a blank line between them.
     assert "about 100 words" in guide
-    assert "  **<the quarter, like Q3 2026-27> plan · <its status>**" in guide
+    # One status line, then the note as its own paragraph: the web app joins single
+    # line breaks, so separate lines ran into one paragraph there.
+    status = "  **<the quarter, like Q3 2026-27> plan · <its status>** · <their designation> ·"
+    assert status in guide
     assert "  **1. <the objective: one actionable goal, at most 8 words>** — <weightage>%" in guide
     assert "  - Why: at most 8 words, tied to what their role expects" in guide
     assert "End with one short question" in guide and "save them as a Draft?" in guide
