@@ -172,7 +172,9 @@ def test_the_context_ends_with_how_to_present_suggestions(client, mbo_hrms) -> N
     assert "Mention no other Slack activity" in guide
     # Laid out for Slack: a bold status line, then each MBO as a bold title with its
     # weightage and two bullets, a blank line between them.
-    assert "about 100 words" in guide
+    assert "about 120 words" in guide
+    # Two natural sentences on why these three, before them, in place of a bare note.
+    assert "<two short sentences, said naturally, as a mentor would: why these three" in guide
     # One status line, then the note as its own paragraph: the web app joins single
     # line breaks, so separate lines ran into one paragraph there.
     status = "  **<the quarter, like Q3 2026-27> plan · <its status>** · <their designation> ·"
@@ -196,7 +198,7 @@ def test_the_context_names_the_guides_with_the_persons_designation(
     # Without the company's criteria the coach still holds MBOs to SMART.
     assert "use SMART: Specific, Measurable, Achievable, Relevant" in guides
     assert "do not quote them or explain that the MBOs pass them" in guides
-    assert "a guide or their designation's part of it, in one short line" in said
+    assert "a guide or their designation's part of it), saying preliminary" in said
 
 
 def test_the_guide_dates_kpis_in_next_quarter_when_only_it_is_open(
