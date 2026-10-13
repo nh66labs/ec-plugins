@@ -6,7 +6,7 @@
 manifest_version: 2
 plugin_id: hrms
 name: HRMS
-version: 0.13.1
+version: 0.13.2
 description: Takes and decides leave requests, answers leave and holiday questions, gives an HRMS administrator an employee's leave trend, and helps people set their quarterly MBOs, in the company's HRMS — as the person asking.
 
 mcp_servers:
