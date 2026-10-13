@@ -42,7 +42,9 @@ def create_app(
     tools.register(server, hrms, jira)
     writes.register(server, hrms)
     forms.register(server, hrms, jira)
-    mbo.register(server, hrms)
+    mbo.register(
+        server, hrms, mbo.Guides.named(settings.mbo_acceptance_guide, settings.mbo_role_guide)
+    )
 
     @server.custom_route("/health", methods=["GET"])
     async def health(_: Request) -> Response:

@@ -11,10 +11,15 @@ from __future__ import annotations
 import json
 from datetime import date
 
+import httpx
 import pytest
+from starlette.testclient import TestClient
 
 from hrms_mcp import mbo
+from hrms_mcp.app import create_app
+from hrms_mcp.config import Settings
 from tests.test_server import (  # noqa: F401, F811 - pytest fixtures
+    EC_TOKEN,
     FakeHrms,
     call,
     client,
@@ -121,6 +126,7 @@ def test_the_handshake_carries_the_mbo_coaching(client) -> None:  # noqa: F811
     assert "totalling exactly\n   100" in said
     assert "Never save before they have agreed" in said
     assert "Only ever discuss the person's own MBOs" in said
+    assert "and for the guides its result names" in said
 
 
 
@@ -161,7 +167,25 @@ def test_the_context_ends_with_how_to_present_suggestions(client, mbo_hrms) -> N
     assert "three numbered MBOs" in guide and "total exactly 100" in guide
     assert "No tables" in guide and "no list of sources" in guide
     assert "Mention no other Slack activity" in guide
-    assert guide.rstrip().endswith("save them as a Draft. Do not save yet.")
+    assert "about 120 words" in guide and "**1. <the objective" in guide
+    assert "End with one short question" in guide and "save them as a Draft?" in guide
+    # The Confirm card already shows the set; saying it again only made the answer long.
+    assert guide.rstrip().endswith("say one line, not the set again.")
+
+
+def test_the_context_names_the_guides_with_the_persons_designation(
+    client, mbo_hrms  # noqa: F811
+) -> None:
+    _plans(mbo_hrms, PLAN, PREVIOUS)
+    said = text(call(client, "get_my_mbo_context"))
+    guides = said[said.index("Before suggesting"):said.index("How to present suggestions")]
+
+    assert '"MBO acceptance criteria": every MBO must meet it' in guides
+    assert '"Role expectations by designation", the part for Software Engineer' in guides
+    # Without the company's criteria the coach still holds MBOs to SMART.
+    assert "use SMART: Specific, Measurable, Achievable, Relevant" in guides
+    assert "do not quote them or explain that the MBOs pass them" in guides
+    assert "a guide or their designation's part of it) in one short line" in said
 
 
 def test_the_guide_dates_kpis_in_next_quarter_when_only_it_is_open(
@@ -176,7 +200,7 @@ def test_the_guide_dates_kpis_in_next_quarter_when_only_it_is_open(
 def test_the_guide_names_no_dates_when_no_plan_is_open(client, mbo_hrms) -> None:  # noqa: F811
     _plans(mbo_hrms, {**PLAN, "can_edit": False}, PREVIOUS)
     said = text(call(client, "get_my_mbo_context"))
-    assert "*KPI* — a number or a date\n" in said
+    assert "  KPI: a number or a date, at most 15 words\n" in said
 
 
 def test_the_context_asks_for_the_quarter_before_and_the_last_three_months(
@@ -325,11 +349,13 @@ def test_the_quarter_after_crosses_the_fiscal_year() -> None:
 def test_the_coaching_keeps_deadlines_inside_the_period() -> None:
     plan = {"fiscal_year": "2026-27", "quarter": 3, "can_edit": True}
     lines = mbo.presentation_lines(plan, date(2026, 9, 20))
-    assert "  *KPI* — a number or a date between 16 Sep 2026 and 15 Dec 2026" in lines
+    assert (
+        "  KPI: a number or a date between 16 Sep 2026 and 15 Dec 2026, at most 15 words" in lines
+    )
     assert not any("period end" in line for line in lines)
     assert any(
         'call save_my_mbo_plan with the fiscal year and quarter of the plan worked on (the open'
-        ' one: fiscal_year "2026-27", quarter 3)' in line and "show the whole set" in line
+        ' one: fiscal_year "2026-27", quarter 3)' in line and "card shows the set" in line
         for line in lines
     )
     assert "lay suggestions out as its result says" in mbo.INSTRUCTIONS
@@ -362,7 +388,45 @@ def test_with_both_quarters_open_the_coaching_gives_each_ones_dates_and_save() -
 def test_a_plan_without_a_quarter_still_gives_the_coaching() -> None:
     plan = {"fiscal_year": "2026-27", "quarter": None, "can_edit": True}
     assert mbo.period_dates(plan) is None
-    assert "  *KPI* — a number or a date" in mbo.presentation_lines(plan, date(2026, 9, 20))
+    assert "  KPI: a number or a date, at most 15 words" in mbo.presentation_lines(
+        plan, date(2026, 9, 20)
+    )
+
+
+def test_the_guides_are_searched_by_the_titles_the_server_is_given() -> None:
+    plan = {"fiscal_year": "2026-27", "quarter": 3, "can_edit": True}
+    guides = mbo.Guides.named("Hamon MBO rules", "  Hamon   role levels ")
+    said = "\n".join(mbo.presentation_lines(plan, date(2026, 9, 20), guides=guides))
+    assert '- "Hamon MBO rules": every MBO must meet it' in said
+    assert '- "Hamon role levels", the part for their level' in said
+    assert "MBO acceptance criteria" not in said
+
+
+def test_a_renamed_guide_set_on_the_server_reaches_the_context(mbo_hrms) -> None:
+    _plans(mbo_hrms, PLAN, PREVIOUS)
+    settings = Settings(
+        hrms_mcp_url="http://hrms.test/api/v1/mcp", hrms_api_key="api-key",
+        hrms_lookup_url="http://hrms.test/lookup", hrms_lookup_token="lookup-token",
+        ec_token=EC_TOKEN, mbo_role_guide="Hamon role levels", _env_file=None,
+    )
+    app = create_app(settings, hrms_transport=httpx.MockTransport(mbo_hrms.handler))
+    with TestClient(app, base_url="http://hrms-mcp:8000") as renamed:
+        said = text(call(renamed, "get_my_mbo_context"))
+    assert '"Hamon role levels", the part for Software Engineer' in said
+    assert '"MBO acceptance criteria": every MBO must meet it' in said
+
+
+def test_a_blank_title_means_the_default_one() -> None:
+    assert mbo.Guides.named("", " ") == mbo.Guides(
+        "MBO acceptance criteria", "Role expectations by designation"
+    )
+
+
+def test_without_a_designation_the_role_guide_is_searched_for_their_level() -> None:
+    plan = {"fiscal_year": "2026-27", "quarter": 3, "can_edit": True}
+    said = "\n".join(mbo.presentation_lines(plan, date(2026, 9, 20)))
+    assert '"Role expectations by designation", the part for their level' in said
+    assert "the part for \n" not in said
 
 
 def test_with_no_plan_open_the_coaching_offers_no_save() -> None:

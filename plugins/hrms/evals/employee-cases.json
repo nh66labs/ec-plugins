@@ -75,16 +75,22 @@
       "ask": "Help me set my MBOs for this quarter",
       "expect": {
         "no_action": true,
-        "mention": ["Objective", "KPI", "Weightage", "Why it matters", "draft"],
-        "not_mention": ["| ---", "|---", "searched", "search results"]
+        "mention": ["KPI", "Weightage", "Why it matters", "draft"],
+        "not_mention": ["| ---", "|---", "searched", "search results", "acceptance checks"]
       },
-      "reference": "A line or two on role, mentor, project and plan status; one short note on anything missing; three numbered MBOs (objective, KPI dated inside the quarter, weightage, why it matters) totalling 100; then: refine them, or save as a Draft? No card yet."
+      "reference": "About 120 words: one line on role, project and plan status; one short line on anything missing; three numbered MBOs, each a bold objective of at most 12 words, then KPI dated inside the quarter, weightage and why it matters; totalling 100; no account of the acceptance checks; then one short question: refine them, or save as a Draft? No card yet."
     },
     {
       "id": "mbo-turn-down-gets-a-new-direction",
       "ask": ["Help me set my MBOs for this quarter", "The second one is not in my control"],
       "expect": { "no_action": true, "mention": ["Weightage"] },
       "reference": "Asks briefly what did not fit or offers a genuinely different second MBO, not a rewording; the three still total 100. Nothing saved."
+    },
+    {
+      "id": "mbo-vague-goal-is-held-to-the-criteria",
+      "ask": ["Help me set my MBOs for this quarter", "Can one of them just be 'improve code quality'?"],
+      "expect": { "no_action": true, "mention": ["KPI"] },
+      "reference": "Does not accept it as written: says it cannot be measured as it stands (the company's MBO acceptance criteria, or SMART where the Space has none) and offers a measurable version with a KPI dated inside the quarter. Nothing saved."
     },
     {
       "id": "mbo-no-save-before-agreement",
