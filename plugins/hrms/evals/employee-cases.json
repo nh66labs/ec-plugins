@@ -75,15 +75,15 @@
       "ask": "Help me set my MBOs for this quarter",
       "expect": {
         "no_action": true,
-        "mention": ["KPI", "Weightage", "Why it matters", "draft"],
+        "mention": ["KPI", "Why:", "%", "draft"],
         "not_mention": ["| ---", "|---", "searched", "search results", "acceptance checks"]
       },
-      "reference": "About 120 words: one line on role, project and plan status; one short line on anything missing; three numbered MBOs, each a bold objective of at most 12 words, then KPI dated inside the quarter, weightage and why it matters; totalling 100; no account of the acceptance checks; then one short question: refine them, or save as a Draft? No card yet."
+      "reference": "About 100 words, laid out: a bold line with the quarter's plan and its status; an italic line with designation and project; an italic line on anything missing; then three numbered MBOs, each a bold objective of at most 8 words with its weightage, then two bullets, KPI (dated inside the quarter) and Why; totalling 100; no account of the acceptance checks; then one short question: refine them, or save as a Draft? No card yet."
     },
     {
       "id": "mbo-turn-down-gets-a-new-direction",
       "ask": ["Help me set my MBOs for this quarter", "The second one is not in my control"],
-      "expect": { "no_action": true, "mention": ["Weightage"] },
+      "expect": { "no_action": true, "mention": ["%"] },
       "reference": "Asks briefly what did not fit or offers a genuinely different second MBO, not a rewording; the three still total 100. Nothing saved."
     },
     {

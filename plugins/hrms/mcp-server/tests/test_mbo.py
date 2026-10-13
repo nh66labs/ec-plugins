@@ -164,10 +164,15 @@ def test_the_context_ends_with_how_to_present_suggestions(client, mbo_hrms) -> N
 
     # KPI dates are this quarter's, the open one.
     assert "between 16 Sep 2026 and 15 Dec 2026" in guide
-    assert "three numbered MBOs" in guide and "total exactly 100" in guide
+    assert "weightages total exactly 100" in guide
     assert "No tables" in guide and "no list of sources" in guide
     assert "Mention no other Slack activity" in guide
-    assert "about 120 words" in guide and "**1. <the objective" in guide
+    # Laid out for Slack: a bold status line, then each MBO as a bold title with its
+    # weightage and two bullets, a blank line between them.
+    assert "about 100 words" in guide
+    assert "  **<the quarter, like Q3 2026-27> plan · <its status>**" in guide
+    assert "  **1. <the objective: one actionable goal, at most 8 words>** — <weightage>%" in guide
+    assert "  - Why: at most 8 words, tied to what their role expects" in guide
     assert "End with one short question" in guide and "save them as a Draft?" in guide
     # The Confirm card already shows the set; saying it again only made the answer long.
     assert guide.rstrip().endswith("say one line, not the set again.")
@@ -185,7 +190,7 @@ def test_the_context_names_the_guides_with_the_persons_designation(
     # Without the company's criteria the coach still holds MBOs to SMART.
     assert "use SMART: Specific, Measurable, Achievable, Relevant" in guides
     assert "do not quote them or explain that the MBOs pass them" in guides
-    assert "a guide or their designation's part of it) in one short line" in said
+    assert "a guide or their designation's part of it, in one short line" in said
 
 
 def test_the_guide_dates_kpis_in_next_quarter_when_only_it_is_open(
@@ -200,7 +205,7 @@ def test_the_guide_dates_kpis_in_next_quarter_when_only_it_is_open(
 def test_the_guide_names_no_dates_when_no_plan_is_open(client, mbo_hrms) -> None:  # noqa: F811
     _plans(mbo_hrms, {**PLAN, "can_edit": False}, PREVIOUS)
     said = text(call(client, "get_my_mbo_context"))
-    assert "  KPI: a number or a date, at most 15 words\n" in said
+    assert "  - KPI: a number or a date, at most 12 words\n" in said
 
 
 def test_the_context_asks_for_the_quarter_before_and_the_last_three_months(
@@ -350,7 +355,8 @@ def test_the_coaching_keeps_deadlines_inside_the_period() -> None:
     plan = {"fiscal_year": "2026-27", "quarter": 3, "can_edit": True}
     lines = mbo.presentation_lines(plan, date(2026, 9, 20))
     assert (
-        "  KPI: a number or a date between 16 Sep 2026 and 15 Dec 2026, at most 15 words" in lines
+        "  - KPI: a number or a date between 16 Sep 2026 and 15 Dec 2026, at most 12 words"
+        in lines
     )
     assert not any("period end" in line for line in lines)
     assert any(
@@ -388,7 +394,7 @@ def test_with_both_quarters_open_the_coaching_gives_each_ones_dates_and_save() -
 def test_a_plan_without_a_quarter_still_gives_the_coaching() -> None:
     plan = {"fiscal_year": "2026-27", "quarter": None, "can_edit": True}
     assert mbo.period_dates(plan) is None
-    assert "  KPI: a number or a date, at most 15 words" in mbo.presentation_lines(
+    assert "  - KPI: a number or a date, at most 12 words" in mbo.presentation_lines(
         plan, date(2026, 9, 20)
     )
 

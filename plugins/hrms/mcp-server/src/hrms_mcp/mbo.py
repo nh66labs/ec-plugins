@@ -348,19 +348,25 @@ def presentation_lines(
         f'- "{guides.role}", {level}: what is expected of them; tie each MBO to it.',
         "- Apply the guides; do not quote them or explain that the MBOs pass them.",
         "",
-        "How to present suggestions (short and clean, for a phone; about 120 words):",
+        "How to present suggestions (neat on a phone in Slack; about 100 words):",
         *late,
-        "- One line first: their role, project and plan status, citing this result once.",
-        "- Anything missing (timesheet notes, project facts, a guide or their designation's"
-        " part of it) in one short line. Mention no other Slack activity, and do not"
-        " describe how anything was looked up.",
-        "- If what is known is thin, say the suggestions are preliminary.",
-        "- Then three numbered MBOs, each exactly in this form:",
-        "  **1. <the objective: one actionable goal, at most 12 words>**",
-        f"  KPI: {kpi}, at most 15 words",
-        "  Weightage: n%",
-        "  Why it matters: at most 12 words, tied to what their role expects",
-        "  The three weightages total exactly 100. No tables; say nothing twice.",
+        "- Lay the answer out exactly in this form, with nothing between its parts:",
+        "  **<the quarter, like Q3 2026-27> plan · <its status>** [cite this result once]",
+        "  *<their designation> · <their project>*",
+        "  *<only if something is missing: timesheet notes, project facts, a guide or their"
+        " designation's part of it, in one short line; say preliminary if what is known is"
+        " thin>*",
+        "",
+        "  **1. <the objective: one actionable goal, at most 8 words>** — <weightage>%",
+        f"  - KPI: {kpi}, at most 12 words",
+        "  - Why: at most 8 words, tied to what their role expects",
+        "",
+        "  (then 2 and 3 the same way, a blank line before each)",
+        "",
+        "  <one short closing question>",
+        "- The three weightages total exactly 100. No tables, no other headings; say nothing"
+        " twice. Mention no other Slack activity, and do not describe how anything was"
+        " looked up.",
         "- Cite a project fact once, where it is used; no list of sources.",
         *close,
     ]
