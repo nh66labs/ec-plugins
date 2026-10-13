@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
@@ -49,25 +50,56 @@ RECENT_NOTES = 8
 #: Days left in a plan's period at which the person is told it is nearly over.
 NEARLY_OVER_DAYS = 14
 
+#: The titles the company's two MBO guides have unless the server is told others
+#: (``MBO_ACCEPTANCE_GUIDE``, ``MBO_ROLE_GUIDE``).
+DEFAULT_ACCEPTANCE_GUIDE = "MBO acceptance criteria"
+DEFAULT_ROLE_GUIDE = "Role expectations by designation"
+
+
+@dataclass(frozen=True)
+class Guides:
+    """The titles of the company's two MBO guides: documents HR writes and a
+    connector brings into the Space's memory. The coach searches for them by
+    title, so a guide is found only when its title is the one named here — a
+    renamed guide needs its new title set on the server. What they say is the
+    company's to change; the HRMS keeps neither.
+    """
+
+    acceptance: str = DEFAULT_ACCEPTANCE_GUIDE
+    role: str = DEFAULT_ROLE_GUIDE
+
+    @classmethod
+    def named(cls, acceptance: str, role: str) -> Guides:
+        """The titles as configured, a blank one meaning its default — so a
+        setting left empty never sends the coach to search for nothing."""
+        return cls(
+            " ".join(acceptance.split()) or DEFAULT_ACCEPTANCE_GUIDE,
+            " ".join(role.split()) or DEFAULT_ROLE_GUIDE,
+        )
+
+
+#: The guides as titled when the server is told nothing else.
+DEFAULT_GUIDES = Guides()
+
 #: How the coach works. Kept short on purpose: the platform keeps the first
 #: 4,000 characters of a server's instructions (its ``INSTRUCTIONS_LIMIT``), and
 #: these follow the leave instructions — a longer version was cut mid-sentence,
 #: and the rules after the cut never reached the model. How suggestions are laid
 #: out travels with the context instead (``presentation_lines``).
 INSTRUCTIONS = """\
-Setting MBOs (the person's own quarterly objectives):
+Setting MBOs (quarterly objectives):
 1. Call get_my_mbo_context first, and lay suggestions out as its result says.
-   Work on the quarter they name, else the open one; if none is open, say why
-   in its words.
-2. Search this Space only for their project's milestones, deadlines and risks
-   (memory, Jira, GitHub). Use only facts about that project; never invent one.
+   Work on the quarter they name, else the open one.
+2. Search this Space for their own project's milestones, deadlines and risks
+   (memory, Jira, GitHub), and for the guides its result names. Never invent facts.
 3. Suggest exactly three MBOs straight away, weightages totalling exactly 100.
 4. When one is turned down, ask briefly what did not fit, then offer a
    genuinely different direction. Push back on KPIs that cannot be measured or
    that they cannot influence.
 5. Never save before they have agreed a set of three to five totalling exactly
-   100; then call save_my_mbo_plan. It saves a Draft they submit in the HRMS.
+   100; then call save_my_mbo_plan.
 6. Only ever discuss the person's own MBOs, never a colleague's.
+7. Keep every reply short: no preamble, nothing restated.
 """
 
 
@@ -239,14 +271,21 @@ def _plan_named(plan: dict[str, Any]) -> str:
 
 
 def presentation_lines(
-    plan: dict[str, Any] | None, today: date, *, other: dict[str, Any] | None = None
+    plan: dict[str, Any] | None,
+    today: date,
+    *,
+    other: dict[str, Any] | None = None,
+    designation: str = "",
+    guides: Guides = DEFAULT_GUIDES,
 ) -> list[str]:
     """How the suggestions are laid out for the person, with the open plan's
     dates in the KPI line, a warning when its period is over or nearly so, and
     which plan a save goes to — or, with no plan open, that none can be made.
     ``other`` is next quarter's plan when it is open too: the person may name
     either, so each one's dates and save target are given, this quarter's
-    being the one worked on unless they name next.
+    being the one worked on unless they name next. ``designation`` is the
+    person's, from the HRMS, so the search for their part of the role guide
+    names it; ``guides`` are the titles searched for.
 
     Here rather than in ``INSTRUCTIONS``: they did not fit in what the platform
     keeps of those, and here they are read only on the turns that set MBOs, right
@@ -288,31 +327,39 @@ def presentation_lines(
         target = f" (the open one: {_plan_named(plan)})."
     if plan:
         close = [
-            "- Once they agree a set, show the whole set, then call save_my_mbo_plan with the"
-            " fiscal year and quarter of the plan worked on" + target,
-            "- End by asking whether to refine them (and what they want to grow in) or save"
-            " them as a Draft. Do not save yet.",
+            "- End with one short question: refine them (and what they want to grow in), or"
+            " save them as a Draft? Do not save yet.",
+            "- Once they agree a set, call save_my_mbo_plan with the fiscal year and quarter of"
+            " the plan worked on" + target + " Its card shows the set, so say one line, not"
+            " the set again.",
         ]
     else:
         close = [
-            "- No plan is open, so nothing can be saved until HR opens one. End by asking"
-            " whether to refine them (and what they want to grow in); do not offer to save.",
+            "- No plan is open, so nothing can be saved until HR opens one: say why in the"
+            " HRMS's words, in one line. End with one short question: refine them (and what"
+            " they want to grow in)? Do not offer to save.",
         ]
+    level = f"the part for {designation}" if designation else "the part for their level"
     return [
-        "How to present suggestions (short enough to read on a phone):",
+        "Before suggesting, search this Space's memory for the company's MBO guides:",
+        f'- "{guides.acceptance}": every MBO must meet it. Without it, use SMART: Specific,'
+        " Measurable, Achievable, Relevant to their role and project, Time-bound inside the"
+        " quarter.",
+        f'- "{guides.role}", {level}: what is expected of them; tie each MBO to it.',
+        "- Apply the guides; do not quote them or explain that the MBOs pass them.",
+        "",
+        "How to present suggestions (short and clean, for a phone; about 120 words):",
         *late,
-        "- Open with one or two sentences: their role, mentor, project and this quarter's"
-        " plan status, citing this result once.",
-        "- If timesheet notes, project milestones or project sources are missing, say so in"
-        " one short sentence. Mention no other Slack activity, and do not describe how"
-        " anything was looked up.",
-        "- If what is known is thin, call the suggestions preliminary and use only the facts"
-        " above.",
-        "- Then three numbered MBOs, each on its own lines:",
-        "  *Objective* — one actionable goal",
-        f"  *KPI* — {kpi}",
-        "  *Weightage* — n%",
-        "  *Why it matters* — one sentence tied to their role and this quarter",
+        "- One line first: their role, project and plan status, citing this result once.",
+        "- Anything missing (timesheet notes, project facts, a guide or their designation's"
+        " part of it) in one short line. Mention no other Slack activity, and do not"
+        " describe how anything was looked up.",
+        "- If what is known is thin, say the suggestions are preliminary.",
+        "- Then three numbered MBOs, each exactly in this form:",
+        "  **1. <the objective: one actionable goal, at most 12 words>**",
+        f"  KPI: {kpi}, at most 15 words",
+        "  Weightage: n%",
+        "  Why it matters: at most 12 words, tied to what their role expects",
         "  The three weightages total exactly 100. No tables; say nothing twice.",
         "- Cite a project fact once, where it is used; no list of sources.",
         *close,
@@ -350,7 +397,7 @@ def agreed_set(given: list[tuple[str, str, float]]) -> list[dict[str, Any]]:
     return rows
 
 
-def register(server: MCPServer, hrms: Hrms) -> None:
+def register(server: MCPServer, hrms: Hrms, guides: Guides = DEFAULT_GUIDES) -> None:
     @server.tool(annotations=READ_ONLY, structured_output=False)
     async def get_my_mbo_context(ctx: Context) -> str:
         """Everything the HRMS knows that helps the person set their MBOs.
@@ -358,7 +405,8 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         Their role and mentor, their projects and who manages them, what they
         have logged in the last three months, last quarter's MBOs, and this and
         next quarter's plans with their dates and whether each can still be
-        changed — then how to lay suggestions out. Call it first.
+        changed — then the company's MBO guides to search for and how to lay
+        suggestions out. Call it first.
         """
         _identity(ctx)  # nothing is asked of the HRMS for no one
         session = await _ask(hrms, ctx, "get_user_session", {})
@@ -393,8 +441,13 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         )
         lines += [""] + work_lines(entries, since)
         plan, *other = open_plans(current, upcoming) or [None]
+        designation = profile.get("designation") if isinstance(profile, dict) else ""
         lines += [""] + presentation_lines(
-            plan, _today(session), other=other[0] if other else None
+            plan,
+            _today(session),
+            other=other[0] if other else None,
+            designation=str(designation or "").strip(),
+            guides=guides,
         )
         return "\n".join(lines)
 

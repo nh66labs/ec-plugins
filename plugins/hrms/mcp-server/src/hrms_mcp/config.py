@@ -47,3 +47,10 @@ class Settings(BaseSettings):
     jira_leave_soon_days: int = 5
     #: For all of Jira's answers together, well inside the HRMS's own limit.
     jira_timeout_seconds: float = 8.0
+
+    #: The titles of the company's two MBO guides, as the documents are named in
+    #: the drive the Space's connector reads. The coach searches by title, so a
+    #: renamed guide is found again once its new title is set here. Blank means
+    #: the default title (``mbo.DEFAULT_ACCEPTANCE_GUIDE``, ``DEFAULT_ROLE_GUIDE``).
+    mbo_acceptance_guide: str = ""
+    mbo_role_guide: str = ""
