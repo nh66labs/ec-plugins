@@ -18,14 +18,14 @@ import asyncio
 import logging
 import re
 from collections.abc import Callable
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Literal
 
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
-from mcp.types import ToolAnnotations
+from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
-from hrms_mcp import workload
+from hrms_mcp import trend, trend_cards, workload
 from hrms_mcp.hrms import Hrms, HrmsError
 from hrms_mcp.jira import Jira, project_keys
 
@@ -654,6 +654,188 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
         lines.extend(said)
         lines.extend(_briefing_for_manager(routed.get("briefing"), said=" ".join(said)))
         return "\n".join(lines)
+
+    @server.tool(annotations=READ_ONLY)
+    async def get_leave_trend(
+        employee: str,
+        ctx: Context,
+        period: trend.Period = trend.DEFAULT_PERIOD,
+        date_from: str = "",
+        date_to: str = "",
+    ) -> CallToolResult:
+        """One employee's leave over a period, counted from the HRMS's records:
+        requests by status, approved days taken, by type, month, quarter and
+        weekday, long breaks around weekends and holidays, repeats, the same
+        length of time before, upcoming leave and the balance now — then the
+        lines that are notable.
+
+        Call it for any question about someone's leave trend, pattern, frequency
+        or history — "what is the trend of Anu taking leave?" — not
+        list_leave_requests_to_decide, which is for deciding. employee is the
+        name, work email or employee code as the person said it, or "me" for
+        their own. Only an HRMS administrator may ask about someone else.
+
+        period: pass the one the person named. With none, leave the default and
+        say the period analysed was the last six months, with its dates.
+        "between dates" takes date_from and date_to as YYYY-MM-DD.
+
+        Answer in this order: the period and its dates; how much leave and how
+        many requests; by type; patterns; against the time before; then the
+        Notable lines — only those as highlights; upcoming leave and the balance
+        are context, said last and never as notable. Say only what the result
+        says: never suggest a reason, a health matter, a motive, misuse or a
+        judgement of the person, and never compare them with other employees — a
+        pattern is counts and dates. The HRMS records no gender: call the person
+        by name or "they", never "he" or "she". When it says too few days to show a pattern, say
+        exactly that. When several people match, ask which one by the names and
+        codes given, then call again with the code. Cite the result, like [1], in
+        each sentence that uses it. Leave reasons are not given; do not look for
+        them elsewhere.
+
+        When you are told the person is shown the result as cards, they already
+        see every figure and the pattern line: write one sentence naming the
+        person and the period, then the Notable lines as short sentences, then
+        upcoming leave in one line — nothing else from the result."""
+        session = await _ask(hrms, ctx, "get_user_session", {})
+        if not isinstance(session, dict) or not session.get("employee_id"):
+            raise ToolError("The HRMS could not say who is asking, so no trend is given.")
+        today = _today(session)
+        try:
+            span = trend.span_of(period, today, date_from, date_to)
+        except ValueError as error:
+            raise ToolError(str(error)) from None
+
+        def said(text: str, cards: list[dict[str, Any]] | None = None) -> CallToolResult:
+            return CallToolResult(
+                content=[TextContent(type="text", text=text)],
+                _meta={trend_cards.BLOCKS_META: cards} if cards else None,
+            )
+
+        if _is_self(session, employee):
+            person: dict[str, Any] | str = {
+                "id": session["employee_id"],
+                "name": session.get("name"),
+                "employee_id": session.get("employee_code"),
+            }
+        elif session.get("role") == "admin":
+            person = await _person_meant(hrms, ctx, employee)
+        else:
+            # The HRMS would answer a non-admin's question about someone else
+            # with the asker's own leave, so it is never put to it.
+            return said(NOT_AN_ADMIN)
+        if isinstance(person, str):
+            return said(person)
+        target = str(person["id"])
+
+        first = span.before_start - timedelta(days=7)
+        last = max(span.end, today) + timedelta(days=7)
+        records, balances, *calendars = await asyncio.gather(
+            _ask(hrms, ctx, "get_leaves", {"employee_id": target}),
+            _balances(hrms, ctx, target),
+            *(_ask(hrms, ctx, "get_holidays", {"year": str(year)})
+              for year in range(first.year, last.year + 1)),
+        )
+        records = [r for r in records or [] if isinstance(r, dict)]
+        if any(str(r.get("employee_id") or target) != target for r in records):
+            # Only ever the person asked about: leave of anyone else, under
+            # their name, would be worse than no answer. A record that names no
+            # one is the answer to asking for this person's leave.
+            raise ToolError(
+                "The HRMS returned leave that is not this person's, so no trend is given. "
+                "Tell the person it could not be checked right now."
+            )
+        holidays = trend.holidays_of(
+            item for calendar in calendars for item in calendar or [] if isinstance(item, dict)
+        )
+        found = trend.summarise(trend.leaves_of(records, kind_of), holidays, span, today)
+        who = _person_label(person)
+        return said(
+            "\n".join(trend.lines(found, who, balance=_balance_line(balances))),
+            trend_cards.cards(found, who, balances),
+        )
+
+
+NOT_AN_ADMIN = "Only an HRMS administrator can look at another employee's leave pattern."
+
+#: What a person says to mean themselves.
+SELF_WORDS = {"me", "myself", "my", "i", "mine"}
+
+
+def _is_self(session: dict[str, Any], employee: str) -> bool:
+    said = employee.strip().casefold()
+    own = {
+        str(session.get(field) or "").casefold()
+        for field in ("name", "employee_code", "company_email")
+    } - {""}
+    return said in SELF_WORDS or said in own
+
+
+def _person_label(person: dict[str, Any]) -> str:
+    name = str(person.get("name") or "This employee")
+    code = str(person.get("employee_id") or "")
+    return f"{name} ({code})" if code else name
+
+
+async def _person_meant(hrms: Hrms, ctx: Context, employee: str) -> dict[str, Any] | str:
+    """The one employee a name, email or code means — or what to say instead.
+
+    The HRMS matches a name as any part of it, so "Anu" finds Anusree and Manu
+    too: an exact name, code or email wins; otherwise a single match; otherwise
+    the assistant is told to ask which one."""
+    wanted = employee.strip()
+    if not wanted:
+        return "Say whose leave to look at — a name, work email or employee code."
+    try:
+        found = await hrms.call("resolve_employee", {"query": wanted}, _identity(ctx))
+    except HrmsError as error:
+        if "no employee found" in str(error).lower():
+            return f'The HRMS has no employee matching "{wanted}".'
+        raise ToolError(str(error)) from None
+    people = [p for p in found or [] if isinstance(p, dict) and p.get("id")]
+    if not people:
+        return f'The HRMS has no employee matching "{wanted}".'
+    key = wanted.casefold()
+    exact = [
+        p for p in people
+        if key in {str(p.get(f) or "").casefold() for f in ("name", "employee_id", "company_email")}
+    ]
+    if len(exact) == 1:
+        return exact[0]
+    if len(people) == 1:
+        return people[0]
+    choices = exact or people
+    named = ", ".join(_person_label(p) for p in choices[:CHOICES_LIMIT])
+    more = len(choices) - CHOICES_LIMIT
+    if more > 0:
+        named += f" and {more} more"
+    return (
+        f'Several people match "{wanted}": {named}. Ask which one they mean, then call '
+        "again with their employee code."
+    )
+
+
+#: How many people a name matching several lists.
+CHOICES_LIMIT = 8
+
+
+async def _balances(hrms: Hrms, ctx: Context, employee_id: str) -> list[trend_cards.Balance]:
+    """Their balance now, a leave type at a time — or none: a trend is still
+    worth giving when the balance cannot be read."""
+    try:
+        found = await _ask(hrms, ctx, "get_leave_balance", {"employee_id": employee_id})
+    except ToolError:
+        return []
+    return [
+        (kind_of(str(item.get("type", ""))), float(item["available"]), float(item["total_quota"]))
+        for item in found or []
+        if isinstance(item, dict) and _number(item.get("available"))
+        and _number(item.get("total_quota"))
+    ]
+
+
+def _balance_line(balances: list[trend_cards.Balance]) -> str:
+    parts = [f"{kind} {available:g} of {quota:g} left" for kind, available, quota in balances]
+    return "Balance now: " + " · ".join(parts) + "." if parts else ""
 
 
 #: The requests a manager may ask about: one still to decide, or one already

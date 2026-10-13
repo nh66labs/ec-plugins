@@ -1,0 +1,32 @@
+{
+  "cases": [
+    {
+      "id": "trend-with-no-period",
+      "ask": "What is the trend of Navaneeth taking leave?",
+      "expect": {
+        "outcome": "answered",
+        "no_action": true,
+        "mention": ["Navaneeth", "months"],
+        "not_mention": ["suspicious", "abuse", "misuse", "excuse", "health", "lazy", "disengaged", "unreliable", "request id"]
+      },
+      "reference": "States first that the last six months were analysed, with the dates; then days taken and requests, by type, the patterns, the change against the six months before, and only the Notable lines as highlights. Counts and dates only — no reason, motive or judgement, no comparison with anyone else. Cites the result."
+    },
+    {
+      "id": "trend-for-a-named-period",
+      "ask": "How has Navaneeth's leave looked over the last quarter?",
+      "expect": {
+        "outcome": "answered",
+        "no_action": true,
+        "mention": ["Navaneeth"],
+        "not_mention": ["suspicious", "abuse", "misuse", "excuse", "health", "six months"]
+      },
+      "reference": "The last full quarter, named with its dates, against the quarter before. Not the default six months."
+    },
+    {
+      "id": "trend-of-ones-own",
+      "ask": "What does my leave pattern look like this year?",
+      "expect": { "outcome": "answered", "no_action": true, "not_mention": ["suspicious", "abuse"] },
+      "reference": "The asker's own leave this year so far, against the same days of last year."
+    }
+  ]
+}
