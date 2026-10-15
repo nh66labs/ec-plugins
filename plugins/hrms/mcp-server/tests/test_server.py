@@ -210,6 +210,7 @@ def test_the_handshake_carries_the_instructions(client: TestClient) -> None:
     assert "never ask for their employee id" in said
     assert "Call start_leave_request" in said
     assert "do not ask again" in said
+    assert "Never ask about projects, managers or approvers" in " ".join(said.split())
 
 
 # --- only Enterprise Claw ------------------------------------------------------------
@@ -372,15 +373,15 @@ def test_the_context_gives_dates_balance_and_approver_without_asking(
     assert "Priya will approve it." in said
 
 
-def test_several_managers_are_named_so_the_assistant_asks_only_then(
-    client: TestClient, hrms: FakeHrms
-) -> None:
+def test_several_managers_are_all_named_as_approvers(client: TestClient, hrms: FakeHrms) -> None:
     hrms.results["get_employee_project_managers"] = {
         "count": 2, "project_managers": [{"id": "a", "name": "Priya"}, {"id": "b", "name": "Arun"}],
     }
     said = text(call(client, "get_leave_context"))
-    assert "You have 2 project managers: Priya and Arun." in said
-    assert "which of them" not in said  # the form asks the person, not the assistant
+    assert (
+        "It goes to Priya and Arun; all of them must approve it, and one rejection rejects it."
+    ) in said
+    assert "which of them" not in said and "?" not in said  # never a choice
 
 
 def test_preview_files_nothing_and_says_so(client: TestClient, hrms: FakeHrms) -> None:
@@ -477,25 +478,32 @@ def test_the_check_speaks_to_the_person_in_plain_sentences(
         "facts": {"balance": {"leave_type": "Casual Leave", "available": 5.0, "requested": 1.0}},
         "briefing": ["Balance: 5.0 Casual Leave day(s) available; this request uses 1.0."],
     }
-    assert _check(client, approver="Abhijith").splitlines() == [
+    assert _check(client).splitlines() == [
         "Casual leave on Fri 9 Oct 2026, full day — 1 day.",
         "You have 5 days of casual leave left — 4 days after this one.",
-        "Abhijith K K will approve it.",
+        "It goes to Abhijith K K and Muhammed Nizar K; all of them must approve it, "
+        "and one rejection rejects it.",
         "Nothing is filed until you confirm.",
     ]
 
 
-def test_the_check_says_first_that_no_approver_was_chosen(
+def test_the_check_never_waits_for_an_approver_to_be_chosen(
     client: TestClient, hrms: FakeHrms
 ) -> None:
-    _two_managers(hrms)
-    said = _check(client).splitlines()
-    assert said[0] == (
-        "You have 2 project managers, Abhijith K K and Muhammed Nizar K, and none was chosen."
-    )
-    assert said[-1] == "Nothing can be filed until one of them is chosen."
-    assert "Nothing is filed until you confirm." not in said
-    assert not any("?" in line for line in said)  # never a question about managers
+    hrms.results["get_employee_project_managers"] = {
+        "count": 3,
+        "project_managers": [{"id": "a", "name": "Priya"}, {"id": "b", "name": "Arun"},
+                             {"id": "c", "name": "Maya"}],
+    }
+    for older in ({}, {"approver": "Arun"}, {"approver": "Nobody"}):  # an older card's
+        said = _check(client, **older).splitlines()
+        assert said[-2:] == [
+            "It goes to Priya, Arun and Maya; all of them must approve it, "
+            "and one rejection rejects it.",
+            "Nothing is filed until you confirm.",
+        ]
+        assert not any("chosen" in line or "?" in line for line in said)
+    assert all("approver" not in c["arguments"] for c in hrms.calls())  # never sent
 
 
 def test_the_hrms_balance_line_goes_however_it_words_the_same(
@@ -507,14 +515,6 @@ def test_the_hrms_balance_line_goes_however_it_words_the_same(
         "briefing": ["Balance: 5 Work-from-home days available; this request uses 1 day."],
     }
     assert "Balance:" not in _check(client)
-
-
-def test_the_check_names_the_approver_already_chosen(client: TestClient, hrms: FakeHrms) -> None:
-    _two_managers(hrms)
-    said = _check(client, approver="Muhammed Nizar K")
-    assert "Muhammed Nizar K will approve it." in said
-    assert "which of them" not in said
-    assert "approver" not in hrms.calls()[0]["arguments"]  # ours, never sent to the HRMS
 
 
 def test_the_check_words_half_days_ranges_and_a_short_balance(
@@ -571,24 +571,6 @@ def test_a_boolean_from_the_hrms_is_not_a_number(client: TestClient, hrms: FakeH
     assert "left" not in said
 
 
-def test_the_check_says_when_the_approver_is_not_one_of_theirs(
-    client: TestClient, hrms: FakeHrms
-) -> None:
-    _two_managers(hrms)
-    for name in ("Maya", "K"):  # none of them; both of them
-        said = _check(client, approver=name).splitlines()
-        assert said[0] == (
-            f"{name} does not name exactly one of your project managers "
-            "(Abhijith K K and Muhammed Nizar K)."
-        )
-        assert said[-1] == "Nothing can be filed until one of them is chosen."
-    hrms.results["get_employee_project_managers"] = {
-        "count": 1, "project_managers": [{"id": "a", "name": "Alice"}],
-    }
-    said = _check(client, approver="Bob")
-    assert "Bob does not name exactly one of your project managers (Alice)." in said
-
-
 def test_a_manager_with_no_name_still_approves(client: TestClient, hrms: FakeHrms) -> None:
     hrms.results["get_employee_project_managers"] = {
         "count": 1, "project_managers": [{"id": "a", "name": ""}],
@@ -640,6 +622,29 @@ def test_apply_files_the_request_and_says_who_approves(client: TestClient, hrms:
     assert filed["_identity"] == IDENTITY
 
 
+def test_a_managers_lookup_that_fails_never_stops_the_filing(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    hrms.errors["get_employee_project_managers"] = "The HRMS could not list managers."
+    said = text(call(client, "apply_leave", APPLY))
+    assert said == (
+        "Filed: Casual leave, Fri 2 Oct 2026, full day — reason: family function. "
+        "Status: Pending."
+    )
+    assert "apply_leave" in [c["name"] for c in hrms.calls()]
+
+
+def test_a_pending_vote_is_not_mistaken_for_one_already_cast(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    hrms.results["get_team_leaves"][0].update(
+        _every_one([("Priya", "Pending"), ("Arun", "Pending")])
+    )
+    hrms.results["approve_leave"] = {"status": "Pending", "message": "Leave approved."}
+    said = text(call(client, "approve_leave", {"request_id": "lv-9", "employee": "Ravi"}))
+    assert not said.startswith("You already approved")
+
+
 def test_applying_twice_files_once(client: TestClient, hrms: FakeHrms) -> None:
     """A confirmed action may be delivered again; the HRMS would file a second
     request, so the server looks first."""
@@ -649,37 +654,30 @@ def test_applying_twice_files_once(client: TestClient, hrms: FakeHrms) -> None:
     assert "apply_leave" not in [c["name"] for c in hrms.calls()]
 
 
-def test_the_named_approver_is_sent_by_id(client: TestClient, hrms: FakeHrms) -> None:
-    hrms.results["get_employee_project_managers"] = {
-        "count": 2, "project_managers": [{"id": "a", "name": "Priya"}, {"id": "b", "name": "Arun"}],
-    }
-    call(client, "apply_leave", {**APPLY, "approver": "arun"})
-    [filed] = [c for c in hrms.calls() if c["name"] == "apply_leave"]
-    assert filed["arguments"]["project_manager_id"] == "b"
-    refused = call(client, "apply_leave", {**APPLY, "approver": "Maya"})
-    assert refused["isError"] is True and "does not name exactly one" in text(refused)
-
-
-def test_several_managers_and_no_approver_files_nothing(
+def test_several_managers_are_all_waited_for_and_none_is_sent(
     client: TestClient, hrms: FakeHrms
 ) -> None:
     hrms.results["get_employee_project_managers"] = {
-        "count": 2, "project_managers": [{"id": "a", "name": "Priya"}, {"id": "b", "name": "Arun"}],
+        "count": 3,
+        "project_managers": [{"id": "a", "name": "Priya"}, {"id": "b", "name": "Arun"},
+                             {"id": "c", "name": "Maya"}],
     }
-    refused = call(client, "apply_leave", APPLY)
-    assert refused["isError"] is True and "Priya, Arun" in text(refused)
-    assert "pass the one the person chose as approver" in text(refused).lower()
-    assert "apply_leave" not in [c["name"] for c in hrms.calls()]
+    for older in ({}, {"approver": "Arun"}, {"approver": "Nobody"}):  # an older card's
+        said = text(call(client, "apply_leave", {**APPLY, **older}))
+        assert said.endswith(
+            "Status: Pending. It is waiting for Priya, Arun and Maya — it is approved once "
+            "all of them approve, and rejected if any of them rejects."
+        )
+    filed = [c["arguments"] for c in hrms.calls() if c["name"] == "apply_leave"]
+    assert len(filed) == 3
+    assert not any({"project_manager_id", "approver"} & set(f) for f in filed)
 
 
-def test_an_approver_is_matched_exactly_before_by_part_of_a_name() -> None:
-    from hrms_mcp.tools import manager_named
-
-    managers = [{"id": "k", "name": "Karuna"}, {"id": "a", "name": "Arun"}]
-    assert manager_named(managers, "Arun") == {"id": "a", "name": "Arun"}, "not Karuna"
-    assert manager_named(managers, "karu") == {"id": "k", "name": "Karuna"}
-    assert manager_named(managers, "a") is None, "both contain it, so ask"
-    assert manager_named(managers, "  ") is None
+def test_with_no_manager_hr_decides(client: TestClient, hrms: FakeHrms) -> None:
+    hrms.results["get_employee_project_managers"] = {"count": 0, "project_managers": []}
+    assert text(call(client, "apply_leave", APPLY)).endswith(
+        "Status: Pending. You have no project manager on record, so HR will decide it."
+    )
 
 
 def test_floating_leave_is_known_by_its_code() -> None:
@@ -763,6 +761,124 @@ def test_a_request_the_hrms_names_no_one_for_is_not_decided(
     assert "approve_leave" not in [c["name"] for c in hrms.calls()]
 
 
+def _every_one(approvals: list[tuple[str, str]], **more: Any) -> dict[str, Any]:
+    """What the HRMS adds to a request that every project manager must approve."""
+    return {
+        "approval_rule": "all",
+        "approvals": [
+            {"approver_id": f"pm-{n}", "approver_name": name, "decision": decision}
+            for n, (name, decision) in enumerate(approvals)
+        ],
+        "approvals_required": len(approvals),
+        "approvals_done": sum(d == "Approved" for _, d in approvals),
+        **more,
+    }
+
+
+def test_the_employee_is_told_who_has_approved_and_who_not_yet(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    hrms.results["get_leaves"][0].update(
+        _every_one([("Priya", "Approved"), ("Arun", "Pending"), ("Maya", "Pending")])
+    )
+    assert text(call(client, "list_my_leaves")) == (
+        "Casual leave, Thu 1 Oct 2026, full day — Pending: family function"
+        " — approved by Priya; waiting for Arun and Maya (request lv-1)"
+    )
+    hrms.results["get_leaves"][0].update(approval_rule="either")  # first decision is final
+    assert "waiting for" not in text(call(client, "list_my_leaves"))
+
+
+def test_a_manager_who_approved_is_told_who_is_left(client: TestClient, hrms: FakeHrms) -> None:
+    team = hrms.results["get_team_leaves"][0]
+    votes = [("Priya", "Approved"), ("Arun", "Pending"), ("Maya", "Pending")]
+    team.update(_every_one(votes))
+    assert text(call(client, "list_leave_requests_to_decide")) == (
+        "Ravi — Casual leave, Thu 1 Oct 2026, full day, Pending. "
+        "Reason: family function. Approved by Priya; waiting for Arun and Maya. (request lv-9)"
+    )
+    team.update(_every_one(votes, my_decision="Approved"))
+    assert "Reason: family function. You approved; waiting for Arun and Maya. (request" in text(
+        call(client, "list_leave_requests_to_decide")
+    )
+
+
+def test_an_approval_that_others_still_wait_on_is_said_as_recorded(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    hrms.results["get_team_leaves"][0].update(
+        _every_one([("Priya", "Approved"), ("Arun", "Pending"), ("Maya", "Pending")])
+    )
+    hrms.results["approve_leave"] = {
+        "final": False, "status": "Pending", "approved_by": ["Priya", "Arun"],
+        "waiting_for": ["Maya"], "action_taken": "approval_recorded",
+    }
+    said = text(call(client, "approve_leave", {"request_id": "lv-9", "employee": "Ravi"}))
+    assert said == (
+        "Your approval of Ravi's casual leave for Thu 1 Oct 2026, full day is recorded. "
+        "It is approved once every project manager approves; still waiting for Maya."
+    )
+
+
+def test_the_last_approval_approves_it(client: TestClient, hrms: FakeHrms) -> None:
+    hrms.results["get_team_leaves"][0].update(
+        _every_one([("Priya", "Approved"), ("Arun", "Approved"), ("Maya", "Pending")])
+    )
+    hrms.results["approve_leave"] = {
+        "final": True, "status": "Approved", "approved_by": ["Priya", "Arun", "Maya"],
+        "waiting_for": [], "action_taken": "approved",
+    }
+    said = text(call(client, "approve_leave", {"request_id": "lv-9", "employee": "Ravi"}))
+    assert said == "Approved Ravi's casual leave for Thu 1 Oct 2026, full day. The HRMS tells Ravi."
+
+
+def test_approving_twice_as_one_of_several_votes_once(client: TestClient, hrms: FakeHrms) -> None:
+    hrms.results["get_team_leaves"][0].update(
+        _every_one([("Priya", "Approved"), ("Arun", "Pending")], my_decision="Approved")
+    )
+    said = text(call(client, "approve_leave", {"request_id": "lv-9", "employee": "Ravi"}))
+    assert said == (
+        "You already approved Ravi's casual leave for Thu 1 Oct 2026, full day; "
+        "still waiting for Arun. Nothing changed."
+    )
+    assert "approve_leave" not in [c["name"] for c in hrms.calls()]
+
+
+def test_a_vote_the_hrms_already_had_is_done_not_failed(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    hrms.results["get_team_leaves"][0].update(
+        _every_one([("Priya", "Approved"), ("Arun", "Pending")])
+    )
+    hrms.results["approve_leave"] = {
+        "action_taken": "already_decided",
+        "status": "Pending",
+        "message": "You have already decided this leave request; it is waiting for the other "
+        "approvers. Nothing changed.",
+    }
+    said = text(call(client, "approve_leave", {"request_id": "lv-9", "employee": "Ravi"}))
+    assert said.startswith("You already approved Ravi's casual leave")
+    assert said.endswith("Nothing changed.")
+
+
+def test_an_answer_that_is_not_a_record_still_reads_as_approved(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    hrms.results["approve_leave"] = "ok"
+    said = text(call(client, "approve_leave", {"request_id": "lv-9", "employee": "Ravi"}))
+    assert said == "Approved Ravi's casual leave for Thu 1 Oct 2026, full day. The HRMS tells Ravi."
+
+
+def test_a_rejection_tells_the_other_approvers_too(client: TestClient, hrms: FakeHrms) -> None:
+    hrms.results["get_team_leaves"][0].update(
+        _every_one([("Priya", "Approved"), ("Arun", "Pending")])
+    )
+    said = text(call(client, "reject_leave", {
+        "request_id": "lv-9", "employee": "Ravi", "reason": "Pending deployment.",
+    }))
+    assert said.endswith("The HRMS tells Ravi and the other approvers.")
+
+
 def test_a_rejected_request_says_why_to_its_employee(client: TestClient, hrms: FakeHrms) -> None:
     hrms.results["get_leaves"][0].update(status="Rejected", notes="pending deployment")
     assert text(call(client, "list_my_leaves")) == (
@@ -806,7 +922,7 @@ def test_what_is_missing_comes_back_as_choices_from_the_hrms(client: TestClient)
     }
     assert form["check"] == {"tool": "preview_leave"}
     names = [q["name"] for q in form["questions"]]
-    assert names == ["leave_type", "day_portion", "reason"], "one PM, so no approver question"
+    assert names == ["leave_type", "day_portion", "reason"]
     leave_type = form["questions"][0]
     assert leave_type["options"][0] == {"value": "Casual Leave", "label": "Casual Leave · 10 left"}
     assert form["prompt"] == "Leave for Wed 30 Sep 2026 — choose the rest:"
@@ -833,13 +949,18 @@ def test_a_complete_request_asks_nothing(client: TestClient) -> None:
     assert form["prompt"] == "Casual leave for Thu 1 Oct 2026, full day."
 
 
-def test_several_managers_are_a_choice(client: TestClient, hrms: FakeHrms) -> None:
+def test_several_managers_are_never_a_choice(client: TestClient, hrms: FakeHrms) -> None:
     hrms.results["get_employee_project_managers"] = {
         "count": 2, "project_managers": [{"id": "a", "name": "Priya"}, {"id": "b", "name": "Arun"}],
     }
     form = _form(call(client, "start_leave_request", {"date_from": "2026-09-30"}))
-    approver = next(q for q in form["questions"] if q["name"] == "approver")
-    assert [o["value"] for o in approver["options"]] == ["Priya", "Arun"]
+    assert [q["name"] for q in form["questions"]] == ["leave_type", "day_portion", "reason"]
+    complete = _form(call(client, "start_leave_request", {
+        "date_from": "2026-10-01", "leave_type": "Casual Leave", "day_portion": "Full Day",
+        "reason": "family function", "approver": "Arun",  # an older call's; ignored
+    }))
+    assert complete["questions"] == []
+    assert "approver" not in complete["action"]["arguments"]
 
 
 def test_no_date_is_for_the_assistant_to_ask(client: TestClient) -> None:

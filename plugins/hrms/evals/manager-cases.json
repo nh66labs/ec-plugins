@@ -25,6 +25,16 @@
       "id": "approve",
       "ask": "Approve the oldest leave request waiting for me",
       "expect": { "outcome": "acted", "action": { "tool": "approve_leave", "state": "proposed" } }
+    },
+    {
+      "id": "approve-as-one-of-several-approvers",
+      "ask": "Approve the leave request waiting for me that another project manager has already approved",
+      "expect": {
+        "outcome": "acted",
+        "action": { "tool": "approve_leave", "state": "proposed" },
+        "not_mention": ["which approver", "now approved"]
+      },
+      "reference": "An approval card for the request whose line says it is approved by one project manager and still waiting for the asker and a third. Does not say the leave will be approved: once confirmed, the approval is recorded and the leave still waits for the third project manager, who is named."
     }
   ]
 }

@@ -4,9 +4,10 @@ The assistant passes whatever it understood from the person — "half-day leave
 tomorrow for a doctor's appointment" gives a date, a day portion and a reason.
 This tool works out what is still missing and answers with a **form**: the
 missing things as choices the person clicks, with options from the HRMS itself
-(their leave types with what is left of each, their project managers), naming
-``apply_leave`` as the write the answers complete and ``preview_leave`` as the
-check to run first.
+(their leave types with what is left of each), naming ``apply_leave`` as the
+write the answers complete and ``preview_leave`` as the check to run first.
+Who approves is never a choice: the HRMS sends the request to every one of the
+person's project managers, and all of them must approve it.
 
 The platform renders the form, collects the answers without a model, runs the
 check, and shows the request to confirm. So a request takes one assistant turn,
@@ -37,7 +38,6 @@ from hrms_mcp.tools import (
     HeadsUp,
     _ask,
     kind_of,
-    manager_named,
     own_heads_up,
     portion_of,
     when_of,
@@ -89,7 +89,6 @@ async def form_for(
     leave_type: str,
     day_portion: str,
     reason: str,
-    approver: str,
 ) -> dict[str, Any]:
     """The form for what is still missing, with options from the HRMS."""
     known: dict[str, Any] = {"date_from": date_from, "date_to": date_to}
@@ -138,23 +137,6 @@ async def form_for(
         known["reason"] = reason.strip()
     else:
         questions.append({"name": "reason", "label": "Reason", "kind": "text"})
-
-    managers = (await _ask(hrms, ctx, "get_employee_project_managers", {}) or {}).get(
-        "project_managers", []
-    )
-    if len(managers) > 1:
-        named = manager_named(managers, approver)
-        if named is not None:
-            known["approver"] = named["name"]
-        else:
-            questions.append(
-                {
-                    "name": "approver",
-                    "label": "Who should approve it",
-                    "kind": "choice",
-                    "options": [{"value": m["name"], "label": m["name"]} for m in managers],
-                }
-            )
 
     what = kind_of(chosen_type) if chosen_type else "Leave"
     prompt = f"{what} for {when_of(date_from, date_to)}"
@@ -211,17 +193,19 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
         leave_type: str = "",
         day_portion: str = "",
         reason: str = "",
+        # Accepted and ignored, so a call made before every project manager
+        # approved still validates: the HRMS sends the request to them all.
         approver: str = "",
     ) -> CallToolResult:
         """Start a leave request for the person asking, from what they said.
 
         Pass every detail you understood — the dates (YYYY-MM-DD, taken from
-        get_leave_context), and the leave type, full or half day, reason and
-        approver if they said them — and nothing you did not hear. Leave out
-        what they did not say: the person is shown the missing things as
-        choices, and nothing is filed until they confirm. Call this instead of
-        asking them about the leave type, full or half day, the reason or the
-        approver. Dates are the one thing to ask for yourself, if they gave none.
+        get_leave_context), and the leave type, full or half day and reason if
+        they said them — and nothing you did not hear. Leave out what they did
+        not say: the person is shown the missing things as choices, and nothing
+        is filed until they confirm. Call this instead of asking them about the
+        leave type, full or half day or the reason. Dates are the one thing to
+        ask for yourself, if they gave none.
         """
         if not _valid_date(date_from):
             raise ToolError(
@@ -234,19 +218,13 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
             return asyncio.create_task(_read_heads_up(hrms, jira, ctx, date_from, date_to))
 
         # Read beside the HRMS, so the form waits only for the slower, unless
-        # nothing can be left to choose: with every detail named, the check runs
-        # at once and says it in full — said here as well, it would be read twice
-        # in a row. An approver not named may still be asked (several managers);
-        # if it is not, the read is called off.
-        asks = not (
-            _type_named(leave_type) and _portion_named(day_portion) and reason.strip()
-            and approver.strip()
-        )
+        # nothing is left to choose: with every detail named, the check runs at
+        # once and says it in full — said here as well, it would be read twice
+        # in a row.
+        asks = not (_type_named(leave_type) and _portion_named(day_portion) and reason.strip())
         reading = read() if asks else None
         try:
-            form = await form_for(
-                hrms, ctx, date_from, date_to, leave_type, day_portion, reason, approver
-            )
+            form = await form_for(hrms, ctx, date_from, date_to, leave_type, day_portion, reason)
         except BaseException:
             if reading is not None:
                 reading.cancel()

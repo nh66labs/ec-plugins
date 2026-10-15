@@ -33,11 +33,13 @@ Compare two runs with `python -m app.evals compare BEFORE.json AFTER.json`.
 
 ## What they assume
 
-- **employee-cases**: the employee has one project manager (with several, the
-  form also asks who approves, and `asks` fails — add `approver` for such a
-  person); a balance of casual leave; next Tuesday free of their own leave and
-  of holidays.
+- **employee-cases**: the employee has one project manager or several (every
+  one of them approves, so the form never asks who); a balance of casual
+  leave; next Tuesday free of their own leave and of holidays.
 - **manager-cases**: at least one request waiting on the manager.
+  `approve-as-one-of-several-approvers` also needs a request filed under
+  "every project manager must approve" with three approvers: one who has
+  approved, the manager asked as, and a third still to decide.
 - **hr-cases**: asked as an HRMS administrator; exactly one employee whose name
   contains "Navaneeth", with some approved leave in the last six months and the
   last quarter (change the name for another HRMS). Graded on what is never said

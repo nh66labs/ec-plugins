@@ -11,7 +11,7 @@
           "arguments": { "reason": "doctor" },
           "asks": ["leave_type", "day_portion"]
         },
-        "not_mention": ["employee id", "which project"]
+        "not_mention": ["employee id", "which project", "who should approve", "which manager"]
       },
       "reference": "A card: the date and reason already filled in; leave type (with balances) and full or half day as choices."
     },
