@@ -645,6 +645,15 @@ def test_a_pending_vote_is_not_mistaken_for_one_already_cast(
     assert not said.startswith("You already approved")
 
 
+def test_a_malformed_managers_answer_never_fails_the_filing(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    hrms.results["get_employee_project_managers"] = ["not", "a", "record"]
+    said = text(call(client, "apply_leave", APPLY))
+    assert said.startswith("Filed: Casual leave")
+    assert said.endswith("Status: Pending.")
+
+
 def test_applying_twice_files_once(client: TestClient, hrms: FakeHrms) -> None:
     """A confirmed action may be delivered again; the HRMS would file a second
     request, so the server looks first."""
@@ -803,6 +812,16 @@ def test_a_manager_who_approved_is_told_who_is_left(client: TestClient, hrms: Fa
     )
 
 
+def test_a_manager_still_to_decide_is_called_you(client: TestClient, hrms: FakeHrms) -> None:
+    hrms.results["get_user_session"]["name"] = "Arun"
+    hrms.results["get_team_leaves"][0].update(
+        _every_one([("Priya", "Approved"), ("Arun", "Pending"), ("Maya", "Pending")])
+    )
+    assert "Approved by Priya; waiting for you and Maya. (request" in text(
+        call(client, "list_leave_requests_to_decide")
+    )
+
+
 def test_an_approval_that_others_still_wait_on_is_said_as_recorded(
     client: TestClient, hrms: FakeHrms
 ) -> None:
@@ -839,9 +858,49 @@ def test_approving_twice_as_one_of_several_votes_once(client: TestClient, hrms: 
     said = text(call(client, "approve_leave", {"request_id": "lv-9", "employee": "Ravi"}))
     assert said == (
         "You already approved Ravi's casual leave for Thu 1 Oct 2026, full day; "
-        "still waiting for Arun. Nothing changed."
+        "still waiting for Arun. A vote cannot be changed. Nothing changed."
     )
     assert "approve_leave" not in [c["name"] for c in hrms.calls()]
+
+
+def test_a_manager_who_approved_cannot_then_reject(client: TestClient, hrms: FakeHrms) -> None:
+    hrms.results["get_team_leaves"][0].update(
+        _every_one([("Priya", "Approved"), ("Arun", "Pending")], my_decision="Approved")
+    )
+    said = text(call(client, "reject_leave", {
+        "request_id": "lv-9", "employee": "Ravi", "reason": "release week",
+    }))
+    assert said.startswith("You already approved Ravi's casual leave")
+    assert "A vote cannot be changed. Nothing changed." in said
+    assert "reject_leave" not in [c["name"] for c in hrms.calls()]
+
+
+def test_a_withdrawn_approver_is_told_they_no_longer_decide(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    hrms.results["get_team_leaves"][0].update(
+        _every_one([("Priya", "Withdrawn"), ("Arun", "Pending")], my_decision="Withdrawn")
+    )
+    said = text(call(client, "approve_leave", {"request_id": "lv-9", "employee": "Ravi"}))
+    assert said == (
+        "You are no longer an approver of Ravi's casual leave for Thu 1 Oct 2026, "
+        "full day. Nothing changed."
+    )
+    assert "approve_leave" not in [c["name"] for c in hrms.calls()]
+
+
+def test_a_rejection_the_hrms_already_had_is_not_said_as_new(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    hrms.results["get_team_leaves"][0].update(
+        _every_one([("Priya", "Approved"), ("Arun", "Pending")])
+    )
+    hrms.results["reject_leave"] = {"action_taken": "already_decided", "status": "Pending"}
+    said = text(call(client, "reject_leave", {
+        "request_id": "lv-9", "employee": "Ravi", "reason": "release week",
+    }))
+    assert not said.startswith("Rejected")
+    assert said.endswith("Nothing changed.")
 
 
 def test_a_vote_the_hrms_already_had_is_done_not_failed(
@@ -857,8 +916,11 @@ def test_a_vote_the_hrms_already_had_is_done_not_failed(
         "approvers. Nothing changed.",
     }
     said = text(call(client, "approve_leave", {"request_id": "lv-9", "employee": "Ravi"}))
-    assert said.startswith("You already approved Ravi's casual leave")
-    assert said.endswith("Nothing changed.")
+    # Read again, the request shows no vote of theirs: say it was decided,
+    # never that they approved it.
+    assert said == (
+        "Ravi's casual leave for Thu 1 Oct 2026, full day was already decided. Nothing changed."
+    )
 
 
 def test_an_answer_that_is_not_a_record_still_reads_as_approved(

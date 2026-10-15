@@ -575,10 +575,11 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
             raise ToolError(str(error)) from None
         if not leaves:
             return f"No leave requests are {status.lower()} for you to decide."
+        me = await _asker_name(hrms, ctx)
         # Side by side: one after another, 20 lookups could outlast the call.
         lines = list(
             await asyncio.gather(
-                *(describe_request(hrms, ctx, item) for item in leaves[:DECIDE_LIMIT])
+                *(describe_request(hrms, ctx, item, me) for item in leaves[:DECIDE_LIMIT])
             )
         )
         more = len(leaves) - DECIDE_LIMIT
@@ -1028,9 +1029,12 @@ def _every_one(item: dict[str, Any]) -> bool:
     return item.get("status") == "Pending" and item.get("approval_rule") == "all"
 
 
-def _votes(item: dict[str, Any]) -> tuple[list[str], list[str]]:
-    """Who has approved a request, and who is still to decide."""
-    return votes_of(item, "Approved"), votes_of(item, "Pending")
+def _votes(item: dict[str, Any], me: str = "") -> tuple[list[str], list[str]]:
+    """Who has approved a request, and who is still to decide — the asker, whose
+    name is ``me``, said as "you"."""
+    def said(names: list[str]) -> list[str]:
+        return ["you" if me and name.casefold() == me.casefold() else name for name in names]
+    return said(votes_of(item, "Approved")), said(votes_of(item, "Pending"))
 
 
 def progress_of(item: dict[str, Any]) -> str:
@@ -1046,12 +1050,14 @@ def progress_of(item: dict[str, Any]) -> str:
     return f" — {'; '.join(said)}" if said else ""
 
 
-def _standing(item: dict[str, Any]) -> str:
+def _standing(item: dict[str, Any], me: str = "") -> str:
     """The same, said to an approver as a sentence: " You approved; waiting for
-    B and C." when they already have — so they are not asked to approve twice."""
+    B and C." when they already have — so they are not asked to approve twice —
+    and "waiting for you and C" while they are still to decide. ``me`` is the
+    asker's name."""
     if not _every_one(item):
         return ""
-    approved, waiting = _votes(item)
+    approved, waiting = _votes(item, me)
     still = f"waiting for {workload.joined(waiting)}" if waiting else ""
     if item.get("my_decision") == "Approved":
         return f" You approved; {still}." if still else " You approved."
@@ -1062,14 +1068,26 @@ def _standing(item: dict[str, Any]) -> str:
     return f" {'; '.join(said)}." if said else ""
 
 
-async def describe_request(hrms: Hrms, ctx: Context, item: dict[str, Any]) -> str:
+async def _asker_name(hrms: Hrms, ctx: Context) -> str:
+    """The asker's name as the HRMS has it, or "" when it will not say — only
+    used to say "you" in place of their own name."""
+    try:
+        me = await _ask(hrms, ctx, "get_user_session", {})
+    except ToolError:
+        return ""
+    return str(me.get("name") or "").strip() if isinstance(me, dict) else ""
+
+
+async def describe_request(
+    hrms: Hrms, ctx: Context, item: dict[str, Any], me: str = ""
+) -> str:
     """One team request as a line: who, what, when, why, where its approval
-    stands, then its id."""
+    stands (said to ``me``, the asker), then its id."""
     leave_id = str(item.get("leave_id") or item.get("id") or "")
     who = str((await _routing(hrms, ctx, leave_id)).get("employee") or "Someone")
     when = when_of(str(item.get("date_from", "")), str(item.get("date_to", "")))
     return (
         f"{who} — {kind_of(item.get('type', ''))}, {when}, {portion_of(item.get('mode', ''))}, "
         f"{item.get('status', '')}. Reason: {item.get('reason') or 'none given'}."
-        f"{_standing(item)} (request {leave_id})"
+        f"{_standing(item, me)} (request {leave_id})"
     )

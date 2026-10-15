@@ -105,7 +105,46 @@ async def _waiting_for(hrms: Hrms, ctx: Context) -> str:
         result = await _ask(hrms, ctx, "get_employee_project_managers", {})
     except ToolError:
         return ""
-    return " " + approvers_sentence((result or {}).get("project_managers", []), filed=True)
+    managers = result.get("project_managers") if isinstance(result, dict) else None
+    if not isinstance(managers, list):
+        return ""
+    managers = [m for m in managers if isinstance(m, dict)]
+    return " " + approvers_sentence(managers, filed=True)
+
+
+def _own_vote(item: dict[str, Any], what: str) -> str:
+    """What to say when the asker's own vote on a request is no longer open —
+    a vote is final, and one withdrawn means they are no longer an approver —
+    or "" while it is open (or they hold none)."""
+    mine = item.get("my_decision")
+    if mine == "Approved":
+        return (
+            f"You already approved {what}{_still(votes_of(item, 'Pending'))}. "
+            "A vote cannot be changed. Nothing changed."
+        )
+    if mine == "Rejected":
+        return f"You already rejected {what}. Nothing changed."
+    if mine == "Withdrawn":
+        return f"You are no longer an approver of {what}. Nothing changed."
+    return ""
+
+
+async def _already_decided(
+    hrms: Hrms, ctx: Context, request_id: str, item: dict[str, Any], who: str
+) -> str:
+    """The answer when the HRMS reports a decision already made — the request, or
+    the asker's own vote. Said from the request as it stands now, read again,
+    since it may have moved since it was listed."""
+    try:
+        item = await _to_decide(hrms, ctx, request_id)
+    except ToolError:
+        pass
+    what = _decided(item, who)
+    status = str(item.get("status") or "")
+    if status in ("Approved", "Rejected", "Cancelled"):
+        return f"Already {status.lower()}: {what}. Nothing changed."
+    already = f"{what[:1].upper()}{what[1:]} was already decided. Nothing changed."
+    return _own_vote(item, what) or already
 
 
 def _still(names: list[str]) -> str:
@@ -211,14 +250,11 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         tell the person that, never that the leave is approved."""
         item, who = await _checked(hrms, ctx, request_id, employee)
         what = _decided(item, who)
-        if item.get("status") == "Approved":
-            return f"Already approved: {what}. Nothing changed."
+        if item.get("status") in ("Approved", "Rejected"):
+            return f"Already {str(item['status']).lower()}: {what}. Nothing changed."
         # Their own vote, on a request still waiting for the others.
-        already_voted = (
-            f"You already approved {what}{_still(votes_of(item, 'Pending'))}. Nothing changed."
-        )
-        if item.get("my_decision") == "Approved":
-            return already_voted
+        if settled := _own_vote(item, what):
+            return settled
         arguments: dict[str, Any] = {"leave_id": request_id}
         if note.strip():
             arguments["notes"] = note.strip()
@@ -231,8 +267,9 @@ def register(server: MCPServer, hrms: Hrms) -> None:
                 f"manager approves{_still(waiting)}."
             )
         if done.get("action_taken") == "already_decided":
-            # A vote the HRMS already had — a retry it saw first — is done, not failed.
-            return already_voted
+            # Decided before this call reached the HRMS — a retry, or another
+            # approver — so it is done, not failed.
+            return await _already_decided(hrms, ctx, request_id, item, who)
         return f"Approved {what}. The HRMS tells {who}."
 
     @server.tool(annotations=UNDOES, structured_output=False)
@@ -251,7 +288,12 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         item, who = await _checked(hrms, ctx, request_id, employee)
         if item.get("status") == "Rejected":
             return f"Already rejected: {_decided(item, who)}. Nothing changed."
-        await _ask(hrms, ctx, "reject_leave", {"leave_id": request_id, "reason": said})
+        # A vote of theirs already cast — an approval included — is final.
+        if settled := _own_vote(item, _decided(item, who)):
+            return settled
+        answer = await _ask(hrms, ctx, "reject_leave", {"leave_id": request_id, "reason": said})
+        if isinstance(answer, dict) and answer.get("action_taken") == "already_decided":
+            return await _already_decided(hrms, ctx, request_id, item, who)
         # One rejection rejects it for everyone it went to, so they hear of it too.
         others = " and the other approvers" if len(item.get("approvals") or []) > 1 else ""
         return (
