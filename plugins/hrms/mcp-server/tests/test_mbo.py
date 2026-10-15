@@ -120,7 +120,7 @@ def test_the_handshake_carries_the_mbo_coaching(client) -> None:  # noqa: F811
     # What the platform keeps of it, not what is sent: the rules past its limit
     # never reach the model, which is how "never save" was once lost unnoticed.
     said = result["instructions"][:PLATFORM_INSTRUCTIONS_LIMIT]
-    assert "get_my_mbo_context first" in said
+    assert "get_my_mbo_context and recall_about_me first" in said
     assert "exactly three MBOs" in said
     assert "genuinely different" in said
     assert "totalling exactly\n   100" in said
@@ -447,3 +447,21 @@ def test_with_no_plan_open_the_coaching_offers_no_save() -> None:
     said = "\n".join(mbo.presentation_lines(None, date(2026, 9, 20)))
     assert "nothing can be saved until HR opens one" in said
     assert "save them as a Draft" not in said and "save_my_mbo_plan" not in said
+
+
+# --- what the person told the coach before (EC-D280 on the platform) ---------------
+
+
+def test_the_coaching_reads_and_keeps_what_the_person_said_about_themselves(
+    client, mbo_hrms  # noqa: F811
+) -> None:
+    """The platform's recall_about_me and remember_about_me: read with the
+    context, the suggestions shaped by it, an achievement never suggested again,
+    and what the person says they want to grow in kept."""
+    _plans(mbo_hrms, PLAN, PREVIOUS)
+    said = text(call(client, "get_my_mbo_context"))
+    assert "What they told you before (recall_about_me) shapes the three" in said
+    assert "Never suggest what they marked achieved" in said
+    assert "build the next step on it" in said
+    assert "keep it with remember_about_me" in said
+

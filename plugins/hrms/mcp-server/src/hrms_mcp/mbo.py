@@ -88,8 +88,9 @@ DEFAULT_GUIDES = Guides()
 #: out travels with the context instead (``presentation_lines``).
 INSTRUCTIONS = """\
 Setting MBOs (quarterly objectives):
-1. Call get_my_mbo_context first, and lay suggestions out as its result says.
-   Work on the quarter they name, else the open one.
+1. Call get_my_mbo_context and recall_about_me first, and
+   lay suggestions out as its result says. Work on the quarter they name,
+   else the open one.
 2. Search this Space for their own project's milestones, deadlines and risks
    (memory, Jira, GitHub), and for the guides its result names. Never invent facts.
 3. Suggest exactly three MBOs straight away, weightages totalling exactly 100.
@@ -329,6 +330,8 @@ def presentation_lines(
         close = [
             "- End with one short question: refine them (and what they want to grow in), or"
             " save them as a Draft? Do not save yet.",
+            "- When they say what they want to grow in, or that they achieved something, keep"
+            " it with remember_about_me and say in a few words what you kept.",
             "- Once they agree a set, call save_my_mbo_plan with the fiscal year and quarter of"
             " the plan worked on" + target + " Its card shows the set, so say one line, not"
             " the set again.",
@@ -347,6 +350,10 @@ def presentation_lines(
         " quarter.",
         f'- "{guides.role}", {level}: what is expected of them; tie each MBO to it.',
         "- Apply the guides; do not quote them or explain that the MBOs pass them.",
+        "",
+        "What they told you before (recall_about_me) shapes the three: their interests and"
+        " what they want to grow into. Never suggest what they marked achieved; say it is"
+        " done in a few words and build the next step on it.",
         "",
         "How to present suggestions (neat on a phone in Slack; about 120 words):",
         *late,

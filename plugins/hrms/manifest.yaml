@@ -6,8 +6,14 @@
 manifest_version: 2
 plugin_id: hrms
 name: HRMS
-version: 0.13.3
+version: 0.14.0
 description: Takes and decides leave requests, answers leave and holiday questions, gives an HRMS administrator an employee's leave trend, and helps people set their quarterly MBOs, in the company's HRMS — as the person asking.
+
+# What a person says about themselves while setting MBOs — their interests, what
+# they want to grow into, what they have achieved — kept in a memory of their
+# own that only they can read, and read back next quarter. The platform's
+# recall_about_me and remember_about_me, offered in Spaces this plugin is in.
+personal_memory: true
 
 mcp_servers:
   - server_id: hrms
