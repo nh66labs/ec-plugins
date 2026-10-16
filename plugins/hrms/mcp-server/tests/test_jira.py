@@ -798,22 +798,23 @@ def test_a_request_with_nothing_to_choose_does_not_read_jira_for_a_heads_up(
     checked: tuple[TestClient, FakeHrms], jira: FakeJira
 ) -> None:
     client, _ = checked
-    _start(client, leave_type="Casual Leave", day_portion="Full Day", reason="family",
-           approver="Priya")
+    _start(client, leave_type="Casual Leave", day_portion="Full Day", reason="family")
     assert jira.paths == []
 
 
-def test_only_the_approver_left_to_choose_still_gives_the_heads_up(
-    checked: tuple[TestClient, FakeHrms],
+def test_several_managers_leave_nothing_to_choose_so_no_heads_up_is_read(
+    checked: tuple[TestClient, FakeHrms], jira: FakeJira
 ) -> None:
+    """Every one of them approves, so who approves is never asked: with the
+    rest named, the check says the tickets once, in full."""
     client, hrms = checked
     hrms.results["get_employee_project_managers"] = {
         "count": 2,
         "project_managers": [{"id": "pm-1", "name": "Priya"}, {"id": "pm-2", "name": "Kiran"}],
     }
     form = _start(client, leave_type="Casual Leave", day_portion="Full Day", reason="family")
-    assert [q["name"] for q in form["questions"]] == ["approver"]
-    assert form["prompt"].startswith("Heads-up:")
+    assert form["questions"] == []
+    assert jira.paths == []
 
 
 def test_a_slow_heads_up_is_read_to_the_end_for_the_next(

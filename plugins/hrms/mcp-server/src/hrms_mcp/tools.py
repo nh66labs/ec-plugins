@@ -49,9 +49,8 @@ nobody else. The HRMS already knows who is asking: never ask for their employee 
 code, name or email, and never pass anyone else's.
 
 Taking a leave request:
-1. Call get_leave_context first: who they are, today's date in their timezone,
-   this week's and next week's dates, their balance and who approves. Take dates
-   from it — never work them out yourself:
+1. Call get_leave_context first, and take dates from it — never work them out
+   yourself:
    "today" is today's date, "tomorrow" the day after, "this Thursday" is this
    week's Thursday and "next Tuesday" next week's Tuesday.
 2. Call start_leave_request with the dates and whatever else the person already
@@ -59,7 +58,8 @@ Taking a leave request:
    not say. They are shown what is missing as choices, then the request to
    confirm: do not ask them about any of it yourself, and do not call
    preview_leave or apply_leave for it. The only thing to ask yourself is the
-   date, if they gave none. Never ask about projects or managers.
+   date, if they gave none. Never ask about projects, managers or approvers:
+   every project manager of theirs must approve, and one rejection rejects it.
 
 When a check has a "Pending in Jira" list, filter it as preview_leave says:
 it is what their project manager will see.
@@ -70,8 +70,8 @@ choice to them: it is a warning, not a refusal.
 
 Deciding requests (project managers and HR): call list_leave_requests_to_decide
 to find the request, then approve_leave or reject_leave. A rejection needs a
-reason: if the person gave one, use their words and do not ask again; only if
-they gave none, ask for it.
+reason: use theirs if given and do not ask again; else ask. When approve_leave
+says others must still approve, tell the manager who.
 
 Asked about someone's leave as their project manager or HR — anything pending,
 work affected while they are away — find the request with
@@ -129,19 +129,6 @@ def kind_of(value: str) -> str:
     """A leave type as a person reads it: ``CL`` → "Casual leave"."""
     value = str(value or "").strip()
     return LEAVE_TYPES.get(value, value[:1].upper() + value[1:].lower() if value else "Leave")
-
-
-def manager_named(managers: list[dict[str, Any]], name: str) -> dict[str, Any] | None:
-    """The one project manager a name means: an exact match, else the only one
-    whose name contains it. Two that contain it, or none, is None — ask instead."""
-    wanted = name.strip().lower()
-    if not wanted:
-        return None
-    exact = [m for m in managers if str(m.get("name", "")).lower() == wanted]
-    if exact:
-        return exact[0] if len(exact) == 1 else None
-    partial = [m for m in managers if wanted in str(m.get("name", "")).lower()]
-    return partial[0] if len(partial) == 1 else None
 
 
 def same_kind(a: str, b: str) -> bool:
@@ -447,7 +434,8 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
                 else ""
             )
             lines.append(
-                f"{kind}, {when}, {mode} — {item.get('status', 'unknown')}: {reason}{why}{ref}"
+                f"{kind}, {when}, {mode} — {item.get('status', 'unknown')}: {reason}{why}"
+                f"{progress_of(item)}{ref}"
             )
         return "\n".join(lines)
 
@@ -494,15 +482,15 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
         day_portion: DayPortion,
         ctx: Context,
         date_to: str = "",
+        # Accepted and ignored, so a card saved before every project manager
+        # approved still validates: the HRMS sends the request to them all.
         approver: str = "",
     ) -> str:
         """Check a leave request before filing it, creating nothing: how many days
-        it counts as, clashes with meetings or teammates' leave, and the balance
-        left. Dates are YYYY-MM-DD; date_to defaults to date_from. Call this
-        before apply_leave with the same details, approver included if one was
-        chosen. The answer is written to the person asking. When it says no
-        approver was chosen, or the name given is not one of theirs, call
-        start_leave_request so they choose — do not ask them yourself.
+        it counts as, clashes with meetings or teammates' leave, the balance
+        left, and who must approve it. Dates are YYYY-MM-DD; date_to defaults to
+        date_from. Call this before apply_leave with the same details. The
+        answer is written to the person asking.
 
         Of the Jira tickets it lists, in its heads-up and its "Pending in Jira"
         list alike, name only those in the person's current sprint and due on or
@@ -537,7 +525,7 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
             jira_sentences(hrms, jira, ctx, off, date_from, until)
         )
         try:
-            approvers, blocked = await _approver_of(hrms, ctx, approver)
+            approvers = await _approvers(hrms, ctx)
         except BaseException:
             reading.cancel()
             raise
@@ -545,8 +533,7 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
         warning = warning_of(
             [teammates_sentence(off, date_from, until), *jira_warnings, balance if short else ""]
         )
-        # What stops it being filed comes first, before any reason to think twice.
-        parts = [p for p in (approvers if blocked else "", warning, head) if p]
+        parts = [p for p in (warning, head) if p]
         if balance and not short:
             parts.append(balance)
         # The HRMS's own list of their open tickets, as their project manager's
@@ -562,11 +549,8 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
             # or when it says more — that the excess is unpaid, say.
             if not (balance and _plain_balance(line))
         )
-        if blocked:
-            parts.append("Nothing can be filed until one of them is chosen.")
-        else:
-            parts.append(approvers)
-            parts.append("Nothing is filed until you confirm.")
+        parts.append(approvers)
+        parts.append("Nothing is filed until you confirm.")
         return "\n".join(parts)
 
     @server.tool(annotations=READ_ONLY, structured_output=False)
@@ -576,8 +560,10 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
     ) -> str:
         """Leave requests waiting on the person asking: their team's, for a
         project manager, and everyone's, for HR. Each line names who, the leave,
-        the dates and the reason, then the request id to pass to approve_leave or
-        reject_leave — never show that id to the person."""
+        the dates and the reason, where an every-manager approval stands, then
+        the request id to pass to approve_leave or reject_leave — never show
+        that id to the person. One that says "you approved" waits on the others:
+        do not approve it again."""
         try:
             leaves = await hrms.call("get_team_leaves", {"status": status}, _identity(ctx))
         except HrmsError as error:
@@ -589,10 +575,11 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
             raise ToolError(str(error)) from None
         if not leaves:
             return f"No leave requests are {status.lower()} for you to decide."
+        me = await _asker_name(hrms, ctx)
         # Side by side: one after another, 20 lookups could outlast the call.
         lines = list(
             await asyncio.gather(
-                *(describe_request(hrms, ctx, item) for item in leaves[:DECIDE_LIMIT])
+                *(describe_request(hrms, ctx, item, me) for item in leaves[:DECIDE_LIMIT])
             )
         )
         more = len(leaves) - DECIDE_LIMIT
@@ -988,14 +975,32 @@ async def _holidays_ahead(hrms: Hrms, ctx: Context, today: str, days: int = 31) 
 
 
 async def _approvers(hrms: Hrms, ctx: Context) -> str:
-    """Who approves the asker's leave, said to the asker: the one, or all of them."""
+    """Who approves the asker's leave, said to the asker before it is filed."""
     result = await _ask(hrms, ctx, "get_employee_project_managers", {})
-    found = (result or {}).get("project_managers", [])
-    if not found:
-        return "You have no project manager on record, so the HRMS will pick the approver."
-    if len(found) == 1:
-        return f"{_name_of(found[0], 'Your project manager')} will approve it."
-    return f"You have {len(found)} project managers: {workload.joined(_manager_names(found))}."
+    return approvers_sentence((result or {}).get("project_managers", []), filed=False)
+
+
+def approvers_sentence(managers: list[dict[str, Any]], *, filed: bool) -> str:
+    """Who decides the asker's leave, said to the asker: the one manager, or all
+    of them — every one must approve. Never a choice: the HRMS sends it to them
+    all. ``filed`` says it of a request just filed ("It is waiting for…")
+    rather than of one about to be."""
+    names = _manager_names(managers)
+    if not names:
+        return "You have no project manager on record, so HR will decide it."
+    if len(names) == 1:
+        if filed:
+            return f"It is waiting for {names[0]} to approve."
+        return f"{_name_of(managers[0], 'Your project manager')} will approve it."
+    if filed:
+        return (
+            f"It is waiting for {workload.joined(names)} — it is approved once all of them "
+            "approve, and rejected if any of them rejects."
+        )
+    return (
+        f"It goes to {workload.joined(names)}; all of them must approve it, "
+        "and one rejection rejects it."
+    )
 
 
 def _name_of(manager: dict[str, Any], blank: str) -> str:
@@ -1008,38 +1013,81 @@ def _manager_names(found: list[dict[str, Any]]) -> list[str]:
     return [_name_of(m, "one with no name") for m in found]
 
 
-async def _approver_of(hrms: Hrms, ctx: Context, approver: str) -> tuple[str, bool]:
-    """Who will approve this request, said to the asker, and whether apply_leave
-    would refuse it as it is — a name that is not exactly one of their managers,
-    or none with several to choose from. Decided as apply_leave decides, so the
-    check never promises what the filing refuses."""
-    result = await _ask(hrms, ctx, "get_employee_project_managers", {})
-    found = (result or {}).get("project_managers", [])
-    managers = _manager_names(found)
-    listed = workload.joined(managers) if managers else "none"
-    if approver.strip():
-        chosen = manager_named(found, approver)
-        if chosen is not None:
-            return f"{_name_of(chosen, approver.strip())} will approve it.", False
-        return (
-            f"{approver.strip()} does not name exactly one of your project managers "
-            f"({listed}).",
-            True,
-        )
-    if not managers:
-        return "You have no project manager on record, so the HRMS will pick the approver.", False
-    if len(managers) == 1:
-        return f"{_name_of(found[0], 'Your project manager')} will approve it.", False
-    return f"You have {len(managers)} project managers, {listed}, and none was chosen.", True
+def votes_of(item: dict[str, Any], decision: str) -> list[str]:
+    """The names of a request's approvers whose vote is ``decision`` ("Approved",
+    "Pending"), as the HRMS lists them on it; none when it lists no approvals."""
+    return [
+        str(a.get("approver_name") or "").strip() or "one with no name"
+        for a in item.get("approvals") or []
+        if isinstance(a, dict) and a.get("decision") == decision
+    ]
 
 
-async def describe_request(hrms: Hrms, ctx: Context, item: dict[str, Any]) -> str:
-    """One team request as a line: who, what, when, why, then its id."""
+def _every_one(item: dict[str, Any]) -> bool:
+    """Whether a request still waits for every project manager to approve it.
+    One filed under the older rule — the first decision is final — never does."""
+    return item.get("status") == "Pending" and item.get("approval_rule") == "all"
+
+
+def _votes(item: dict[str, Any], me: str = "") -> tuple[list[str], list[str]]:
+    """Who has approved a request, and who is still to decide — the asker, whose
+    name is ``me``, said as "you"."""
+    def said(names: list[str]) -> list[str]:
+        return ["you" if me and name.casefold() == me.casefold() else name for name in names]
+    return said(votes_of(item, "Approved")), said(votes_of(item, "Pending"))
+
+
+def progress_of(item: dict[str, Any]) -> str:
+    """Where a request waiting on every project manager stands, said to its
+    employee: " — approved by A; waiting for B and C". Empty for any other."""
+    if not _every_one(item):
+        return ""
+    approved, waiting = _votes(item)
+    said = [
+        *([f"approved by {workload.joined(approved)}"] if approved else []),
+        *([f"waiting for {workload.joined(waiting)}"] if waiting else []),
+    ]
+    return f" — {'; '.join(said)}" if said else ""
+
+
+def _standing(item: dict[str, Any], me: str = "") -> str:
+    """The same, said to an approver as a sentence: " You approved; waiting for
+    B and C." when they already have — so they are not asked to approve twice —
+    and "waiting for you and C" while they are still to decide. ``me`` is the
+    asker's name."""
+    if not _every_one(item):
+        return ""
+    approved, waiting = _votes(item, me)
+    still = f"waiting for {workload.joined(waiting)}" if waiting else ""
+    if item.get("my_decision") == "Approved":
+        return f" You approved; {still}." if still else " You approved."
+    said = [
+        *([f"Approved by {workload.joined(approved)}"] if approved else []),
+        *([still] if still else []),
+    ]
+    return f" {'; '.join(said)}." if said else ""
+
+
+async def _asker_name(hrms: Hrms, ctx: Context) -> str:
+    """The asker's name as the HRMS has it, or "" when it will not say — only
+    used to say "you" in place of their own name."""
+    try:
+        me = await _ask(hrms, ctx, "get_user_session", {})
+    except ToolError:
+        return ""
+    return str(me.get("name") or "").strip() if isinstance(me, dict) else ""
+
+
+async def describe_request(
+    hrms: Hrms, ctx: Context, item: dict[str, Any], me: str = ""
+) -> str:
+    """One team request as a line: who, what, when, why, where its approval
+    stands (said to ``me``, the asker), then its id."""
     leave_id = str(item.get("leave_id") or item.get("id") or "")
     who = str((await _routing(hrms, ctx, leave_id)).get("employee") or "Someone")
     when = when_of(str(item.get("date_from", "")), str(item.get("date_to", "")))
     return (
         f"{who} — {kind_of(item.get('type', ''))}, {when}, {portion_of(item.get('mode', ''))}, "
-        f"{item.get('status', '')}. Reason: {item.get('reason') or 'none given'}. "
-        f"(request {leave_id})"
+        f"{item.get('status', '')}. Reason: {item.get('reason') or 'none given'}."
+        f"{_standing(item, me)} (request {leave_id})"
     )
