@@ -460,7 +460,9 @@ def test_the_coaching_reads_and_keeps_what_the_person_said_about_themselves(
     and what the person says they want to grow in kept."""
     _plans(mbo_hrms, PLAN, PREVIOUS)
     said = text(call(client, "get_my_mbo_context"))
-    assert "What they told you before (recall_about_me) shapes the three" in said
+    assert "Make the three stretch goals: a step beyond their current work" in said
+    assert "from their project and from what they told you before (recall_about_me)" in said
+    assert "at least one of the three grows it, still tied to their project or role" in said
     assert "Never suggest what they marked achieved" in said
     assert "build the next step on it" in said
     assert "keep it with remember_about_me" in said
