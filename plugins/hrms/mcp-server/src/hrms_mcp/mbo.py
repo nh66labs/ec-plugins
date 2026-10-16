@@ -351,9 +351,12 @@ def presentation_lines(
         f'- "{guides.role}", {level}: what is expected of them; tie each MBO to it.',
         "- Apply the guides; do not quote them or explain that the MBOs pass them.",
         "",
-        "What they told you before (recall_about_me) shapes the three: their interests and"
-        " what they want to grow into. Never suggest what they marked achieved; say it is"
-        " done in a few words and build the next step on it.",
+        "Make the three stretch goals: a step beyond their current work, yet doable inside"
+        " the quarter. Build them from their project and from what they told you before"
+        " (recall_about_me): when it holds an interest or what they want to grow into, at"
+        " least one of the three grows it, still tied to their project or role. Never"
+        " suggest what they marked achieved; say it is done in a few words and build the"
+        " next step on it.",
         "",
         "How to present suggestions (neat on a phone in Slack; about 120 words):",
         *late,
@@ -362,13 +365,13 @@ def presentation_lines(
         " <their project> [cite this result once]",
         "",
         "  <two short sentences, said naturally, as a mentor would: why these three — what in"
-        " their project, plan or role they come from — then anything missing (timesheet"
+        " their project, plan, role or interests they come from — then anything missing (timesheet"
         " notes, project facts, a guide or their designation's part of it), saying"
         " preliminary if what is known is thin>",
         "",
         "  **1. <the objective: one actionable goal, at most 8 words>** — <weightage>%",
         f"  - KPI: {kpi}, at most 12 words",
-        "  - Why: at most 8 words, tied to what their role expects",
+        "  - Why: at most 8 words, tied to what their role expects or the interest it grows",
         "",
         "  (then 2 and 3 the same way, a blank line before each)",
         "",
