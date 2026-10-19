@@ -912,6 +912,22 @@ def _briefing_for_manager(
     return kept
 
 
+async def _email_of(hrms: Hrms, ctx: Context, name: str) -> str:
+    """The work email of the one employee the HRMS calls exactly this, or "".
+
+    The HRMS names an applicant and nothing more; their email is what finds them
+    in Jira, where their name may be spelt differently."""
+    try:
+        found = await _ask(hrms, ctx, "resolve_employee", {"query": name})
+    except ToolError:
+        return ""
+    same = [
+        p for p in found or []
+        if isinstance(p, dict) and str(p.get("name") or "").casefold() == name.casefold()
+    ]
+    return str(same[0].get("company_email") or "") if len(same) == 1 else ""
+
+
 async def their_jira(
     hrms: Hrms, jira: JiraReader | None, ctx: Context, who: str, request_id: str,
     date_from: str, date_to: str,
@@ -930,14 +946,16 @@ async def their_jira(
         start, end = date.fromisoformat(date_from), date.fromisoformat(date_to)
     except ValueError:
         return None
-    session, work = await _session_and_work(hrms, jira, ctx, leave_id=request_id)
+    (session, work), email = await asyncio.gather(
+        _session_and_work(hrms, jira, ctx, leave_id=request_id), _email_of(hrms, ctx, who)
+    )
     if work is None:
         return None
     settings = jira.settings
     said = []
     if work.projects:
         said.append(workload.their_work(
-            work.projects, who, start, end, account=work.account,
+            work.projects, who, start, end, email=email, account=work.account,
             today=_today(session),
             after_days=settings.jira_after_leave_days,
             soon_days=settings.jira_leave_soon_days,
@@ -962,11 +980,15 @@ async def their_jira(
         work.projects, [who], start, end,
         tight_days=settings.sprint_tight_days,
         tight_share=settings.sprint_tight_open_share,
+        email=email,
         account=work.account,
     )
     # With no project read, the HRMS's own briefing — already narrowed to the
-    # asker's projects — is all there is: nothing to narrow it further by.
-    return said, ({p.key for p in work.projects} if work.projects else None)
+    # asker's projects — is all there is: nothing to narrow it further by. A
+    # project whose Jira did not answer is still the asker's: its lines stay.
+    if not work.projects:
+        return said, None
+    return said, {p.key for p in work.projects} | set(work.unreadable_keys)
 
 
 _WEEK = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
