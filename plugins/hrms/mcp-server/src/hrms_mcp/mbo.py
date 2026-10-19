@@ -97,7 +97,7 @@ Setting MBOs (quarterly objectives):
 4. When one is turned down, ask briefly what did not fit, then offer a
    genuinely different direction. Judge any goal they propose by the criteria
    guide: search it and cite it.
-5. Never save before they have agreed a set of three to five totalling exactly
+5. Never save before they have agreed a set the criteria guide allows, totalling exactly
    100; then call save_my_mbo_plan.
 6. Only ever discuss the person's own MBOs, never a colleague's.
 7. Keep every reply short: no preamble, nothing restated.
@@ -376,6 +376,8 @@ def presentation_lines(
         "  (then 2 and 3 the same way, a blank line before each)",
         "",
         "  <one short closing question>",
+        "- Every KPI date falls inside the quarter worked on, never after its last day; every"
+        " KPI measures only what they control, never a client's or another team's decision.",
         "- The three weightages total exactly 100. No tables, no other headings; say nothing"
         " twice. Mention no other Slack activity, and do not describe how anything was"
         " looked up.",

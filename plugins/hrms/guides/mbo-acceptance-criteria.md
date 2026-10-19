@@ -56,7 +56,7 @@ Q4: 16 Dec – 15 Mar).
 
 ## Rules for the whole set
 
-- **Three to five MBOs** a quarter.
+- **Two to three MBOs** a quarter.
 - **Weightages total exactly 100.** No single MBO below 10.
 - **At least one MBO is about growth**: a skill, a responsibility or a
   certification the person is building towards.

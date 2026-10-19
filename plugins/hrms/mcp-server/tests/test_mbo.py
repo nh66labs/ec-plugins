@@ -124,7 +124,7 @@ def test_the_handshake_carries_the_mbo_coaching(client) -> None:  # noqa: F811
     assert "exactly three MBOs" in said
     assert "genuinely different" in said
     assert "totalling exactly\n   100" in said
-    assert "Never save before they have agreed" in said
+    assert "Never save before they have agreed a set the criteria guide allows" in said
     assert "Only ever discuss the person's own MBOs" in said
     assert "and for the guides its result names" in said
     # A goal the person proposes is judged by the guide, searched and cited: answered
@@ -461,6 +461,10 @@ def test_the_coaching_reads_and_keeps_what_the_person_said_about_themselves(
     _plans(mbo_hrms, PLAN, PREVIOUS)
     said = text(call(client, "get_my_mbo_context"))
     assert "Make the three stretch goals: a step beyond their current work" in said
+    # Found live: a KPI dated 31 Dec in a quarter ending 15 Dec, and one that waited on
+    # the client's use — both against the criteria guide, corrected only when asked.
+    assert "Every KPI date falls inside the quarter worked on, never after its last day" in said
+    assert "never a client's or another team's decision" in said
     assert "from their project and from what they told you before (recall_about_me)" in said
     assert "at least one of the three grows it, still tied to their project or role" in said
     assert "Never suggest what they marked achieved" in said
