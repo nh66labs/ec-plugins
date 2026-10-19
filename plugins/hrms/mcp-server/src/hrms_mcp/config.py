@@ -25,17 +25,9 @@ class Settings(BaseSettings):
     #: slow HRMS is reported as slow rather than as a call that vanished.
     hrms_timeout_seconds: float = 20.0
 
-    #: Optional: a Jira this server reads, with one read-only service account,
-    #: to warn about work a leave would leave undone. Unset, the leave check
-    #: says what the HRMS says and nothing more. The token is a secret.
-    jira_url: str = ""
-    jira_email: str = ""
-    jira_api_token: str = ""
-    #: Which Jira project each HRMS project is, as ``HRMS name=KEY`` pairs
-    #: separated by ``;`` — e.g. ``EC Platform=ECP;Payroll=PAY``. A project not
-    #: named is not looked at.
-    jira_projects: str = ""
-    #: A sprint is tight when it ends within this many working days after the
+    #: Jira is not set up here: the HRMS reads it, through the Jira connections
+    #: an admin adds on its dashboard. What follows only tunes the leave
+    #: warnings. A sprint is tight when it ends within this many working days after the
     #: leave, with more than this share of its tickets still open.
     sprint_tight_days: int = 3
     sprint_tight_open_share: float = 0.3
@@ -45,8 +37,10 @@ class Settings(BaseSettings):
     #: in progress with no deadline. Any other open ticket is only counted.
     jira_after_leave_days: int = 3
     jira_leave_soon_days: int = 5
-    #: For all of Jira's answers together, well inside the HRMS's own limit.
-    jira_timeout_seconds: float = 8.0
+    #: How long a leave check waits for the HRMS's reading of Jira before it
+    #: goes on without it: with the HRMS's own calls, well inside Enterprise
+    #: Claw's 45-second limit on a tool call.
+    jira_wait_seconds: float = 10.0
 
     #: The titles of the company's two MBO guides, as the documents are named in
     #: the drive the Space's connector reads. The coach searches by title, so a

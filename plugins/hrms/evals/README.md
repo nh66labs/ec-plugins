@@ -40,6 +40,9 @@ Compare two runs with `python -m app.evals compare BEFORE.json AFTER.json`.
   `approve-as-one-of-several-approvers` also needs a request filed under
   "every project manager must approve" with three approvers: one who has
   approved, the manager asked as, and a third still to decide.
+  `pending-work-in-my-projects-only` needs the waiting request's applicant on
+  two projects linked to Jira in the HRMS (Jira settings), only one of them the
+  manager's, with open tickets in both.
 - **hr-cases**: asked as an HRMS administrator; exactly one employee whose name
   contains "Navaneeth", with some approved leave in the last six months and the
   last quarter (change the name for another HRMS). Graded on what is never said

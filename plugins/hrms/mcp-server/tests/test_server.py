@@ -390,8 +390,12 @@ def test_preview_files_nothing_and_says_so(client: TestClient, hrms: FakeHrms) -
     }))
     assert said.startswith("Casual leave on Thu 1 Oct 2026, full day — 1 day.")
     assert "Nothing is filed until you confirm." in said
-    assert [c["name"] for c in hrms.calls()] == ["preview_leave", "get_employee_project_managers"]
-    assert hrms.calls()[0]["arguments"] == {
+    # Reads only: the check, its approvers, and Jira through the HRMS.
+    assert {c["name"] for c in hrms.calls()} == {
+        "preview_leave", "get_employee_project_managers", "get_user_session", "get_jira_work",
+    }
+    [checked] = [c for c in hrms.calls() if c["name"] == "preview_leave"]
+    assert checked["arguments"] == {
         "leave_type": "Casual Leave", "leave_mode": "Full Day",
         "date_from": "2026-10-01", "date_to": "2026-10-01",
     }

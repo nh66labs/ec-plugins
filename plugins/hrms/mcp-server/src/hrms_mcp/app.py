@@ -23,18 +23,18 @@ from hrms_mcp import forms, mbo, tools, writes
 from hrms_mcp.auth import BearerAuth
 from hrms_mcp.config import Settings
 from hrms_mcp.hrms import Hrms
-from hrms_mcp.jira import Jira
+from hrms_mcp.jira_work import JiraReader
 
 
 def create_app(
     settings: Settings | None = None,
     hrms_transport: httpx.AsyncBaseTransport | None = None,
-    jira_transport: httpx.AsyncBaseTransport | None = None,
 ) -> BearerAuth:
     settings = settings or Settings()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     hrms = Hrms(settings, transport=hrms_transport)
-    jira = Jira(settings, transport=jira_transport)
+    # Jira is read through the HRMS, which holds the company's Jira connections.
+    jira = JiraReader(hrms)
 
     server = MCPServer(
         "HRMS", instructions=tools.INSTRUCTIONS + "\n" + mbo.INSTRUCTIONS, version="0.17.0"

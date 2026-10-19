@@ -27,7 +27,7 @@ from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
 from hrms_mcp import trend, workload
 from hrms_mcp.hrms import Hrms, HrmsError
-from hrms_mcp.jira import Jira, project_keys
+from hrms_mcp.jira_work import JiraReader, JiraWork
 
 log = logging.getLogger("hrms_mcp")
 
@@ -61,8 +61,8 @@ Taking a leave request:
    date, if they gave none. Never ask about projects, managers or approvers:
    every project manager of theirs must approve, and one rejection rejects it.
 
-When a check has a "Pending in Jira" list, filter it as preview_leave says:
-it is what their project manager will see.
+When a check has "Pending in Jira" lists, filter them as preview_leave says:
+each is what the manager named above it will see.
 
 When a check starts with "Heads-up" — teammates already off, open Jira tickets,
 a tight sprint — tell the person that first, with the ticket keys, and leave the
@@ -241,35 +241,41 @@ def _briefing_lines(briefing: Any, *, said: str = "") -> list[str]:
     ]
 
 
+async def _session_and_work(
+    hrms: Hrms, jira: JiraReader, ctx: Context, *, leave_id: str = "", reuse: bool = False
+) -> tuple[dict[str, Any], JiraWork | None]:
+    """The asker's session — {} when the HRMS will not give it — and the Jira
+    work the HRMS reads for them (``JiraReader.read``), asked side by side."""
+
+    async def session() -> dict[str, Any]:
+        try:
+            answer = await _ask(hrms, ctx, "get_user_session", {})
+        except ToolError:
+            return {}
+        # An HRMS that answers in plain text gives a str, not the shape asked for.
+        return answer if isinstance(answer, dict) else {}
+
+    return await asyncio.gather(session(), jira.read(ctx, leave_id=leave_id, reuse=reuse))
+
+
 async def _own_jira(
-    hrms: Hrms, jira: Jira, ctx: Context, date_from: str, date_to: str, *, reuse: bool
+    hrms: Hrms, jira: JiraReader, ctx: Context, date_from: str, date_to: str, *, reuse: bool
 ) -> tuple[list[workload.ProjectWork], dict[str, Any], str, str, date, date] | None:
-    """The asker's projects' open work in Jira, with what the rules need about
-    them — their session, email and Jira account — and the leave's dates; None
-    when Jira does not answer, or the HRMS cannot say who they are or what they
-    work on. ``reuse`` takes a recent answer from Jira (``Jira.work``). Never
-    raises: a warning left out is better than a leave that cannot be started or
-    checked."""
+    """The asker's projects' open work in Jira, as the HRMS read it, with what
+    the rules need about them — their session, email and Jira account — and the
+    leave's dates; None when the HRMS does not say who they are or what Jira
+    holds of theirs. ``reuse`` takes a recent answer (``JiraReader.read``).
+    Never raises: a warning left out is better than a leave that cannot be
+    started or checked."""
     try:
         start, end = date.fromisoformat(date_from), date.fromisoformat(date_to)
-        session = await _ask(hrms, ctx, "get_user_session", {}) or {}
-        projects = await _ask(hrms, ctx, "get_my_projects", {}) or []
-    except (ToolError, ValueError):
+    except ValueError:
         return None
-    # An HRMS that answers in plain text gives a str, not the shapes asked for.
-    if not isinstance(session, dict):
-        session = {}
-    if not isinstance(projects, list):
-        projects = []
-    names = [str(p.get("name") or "") for p in projects if isinstance(p, dict)]
+    session, work = await _session_and_work(hrms, jira, ctx, reuse=reuse)
+    if work is None or not work.projects:
+        return None
     email = str(session.get("company_email") or "")
-    work, account = await asyncio.gather(
-        jira.work(project_keys(jira.settings, names), reuse=reuse),
-        jira.account_of(email, reuse=reuse),
-    )
-    if not work:
-        return None
-    return work, session, email, account, start, end
+    return work.projects, session, email, work.account, start, end
 
 
 #: Says the heads-up in at most the characters given ("" when it does not fit).
@@ -277,13 +283,13 @@ HeadsUp = Callable[[int], str]
 
 
 async def own_heads_up(
-    hrms: Hrms, jira: Jira | None, ctx: Context, date_from: str, date_to: str
+    hrms: Hrms, jira: JiraReader | None, ctx: Context, date_from: str, date_to: str
 ) -> HeadsUp | None:
     """The asker's own tickets these dates touch, as one short sentence for the
     moment they name them (``workload.own_heads_up``), sized once the room for
     it is known; None when Jira was not read. A recent answer from Jira will
     do: the check before Confirm reads it again."""
-    if jira is None or not jira.configured:
+    if jira is None:
         return None
     read = await _own_jira(hrms, jira, ctx, date_from, date_to, reuse=True)
     if read is None:
@@ -303,7 +309,7 @@ async def own_heads_up(
 
 
 async def jira_sentences(
-    hrms: Hrms, jira: Jira | None, ctx: Context, off: list[str], date_from: str, date_to: str
+    hrms: Hrms, jira: JiraReader | None, ctx: Context, off: list[str], date_from: str, date_to: str
 ) -> tuple[list[str], str] | None:
     """What Jira says about this leave, or None when Jira was not read: the
     sentences that warn, and a note said as a plain line when none of the
@@ -314,7 +320,7 @@ async def jira_sentences(
     a Jira or an HRMS that does not answer here leaves the warning out. Jira is
     read afresh, so a ticket closed or moved since the heads-up is not warned of.
     """
-    if jira is None or not jira.configured:
+    if jira is None:
         return None
     read = await _own_jira(hrms, jira, ctx, date_from, date_to, reuse=False)
     if read is None:
@@ -364,7 +370,7 @@ def _day(value: str) -> str:
     return f"{parsed:%a} {parsed.day} {parsed:%b %Y}"
 
 
-def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
+def register(server: MCPServer, hrms: Hrms, jira: JiraReader | None = None) -> None:
     @server.tool(annotations=READ_ONLY, structured_output=False)
     async def get_holidays(year: int, ctx: Context, month: int = 0) -> str:
         """The company's holidays for a year, or for one month of it.
@@ -493,13 +499,15 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
         answer is written to the person asking.
 
         Of the Jira tickets it lists, in its heads-up and its "Pending in Jira"
-        list alike, name only those in the person's current sprint and due on or
-        after the leave's first day — the same tickets their project manager is
-        shown. Leave out one due before the leave starts, even if still open: a
-        ticket due Oct 15 or Oct 20 is not named for a leave from Nov 7. Leave
-        out one with no due date, or in no current sprint. When none is left,
-        say none of their current sprint's tickets fall due on or after the
-        leave; do not list or count the ones left out."""
+        lists alike, name only those in the person's current sprint and due on
+        or after the leave's first day. Each "Pending in Jira" list comes under
+        a project manager's name and holds only the projects that manager
+        manages: keep each list under its own manager. Leave out one due before
+        the leave starts, even if still open: a ticket due Oct 15 or Oct 20 is
+        not named for a leave from Nov 7. Leave out one with no due date, or in
+        no current sprint. When none is left, say none of their current
+        sprint's tickets fall due on or after the leave; do not list or count
+        the ones left out."""
         result = await _ask(
             hrms,
             ctx,
@@ -536,8 +544,8 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
         parts = [p for p in (warning, head) if p]
         if balance and not short:
             parts.append(balance)
-        # The HRMS's own list of their open tickets, as their project manager's
-        # card will show it: said as it is, so both read the same.
+        # The HRMS's own lists of their open tickets, as each project manager's
+        # card will show them: said as they are, so all read the same.
         if pending := str(result.get("pending_jira") or "").strip():
             parts.append(pending)
         if jira_note:
@@ -591,8 +599,9 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
     async def get_leave_request_impact(request_id: str, ctx: Context) -> str:
         """What one leave request on the asker's team would leave undone, for the
         project manager or HR asking about it: the applicant's open Jira tickets
-        by key and summary, a sprint of theirs that is tight, and the HRMS's own
-        briefing — meetings that day, teammates also off, balance. request_id
+        by key and summary — in the projects the asker manages only, every one
+        for HR — a sprint of theirs that is tight, and the HRMS's own briefing —
+        meetings that day, teammates also off, balance. request_id
         comes from list_leave_requests_to_decide; never show it to the person.
 
         Of the tickets it lists, name only those in the applicant's current
@@ -636,10 +645,14 @@ def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
             f"{portion_of(item.get('mode', ''))}, {item.get('status', '')}. "
             f"Reason: {item.get('reason') or 'none given'}."
         ]
-        from_jira = await their_jira(hrms, jira, ctx, who, date_from, date_to)
-        said = from_jira or ["Jira was not checked, so their open tickets are unknown."]
+        from_jira = await their_jira(hrms, jira, ctx, who, request_id, date_from, date_to)
+        said, checked = from_jira or (
+            ["Jira was not checked, so their open tickets are unknown."], None
+        )
         lines.extend(said)
-        lines.extend(_briefing_for_manager(routed.get("briefing"), said=" ".join(said)))
+        lines.extend(
+            _briefing_for_manager(routed.get("briefing"), said=" ".join(said), checked=checked)
+        )
         return "\n".join(lines)
 
     @server.tool(annotations=READ_ONLY)
@@ -865,21 +878,33 @@ _TICKET = re.compile(r"\b[A-Z][A-Z0-9_]*-\d+\b")
 
 def _said_already(line: str, said: str) -> bool:
     """A Jira line of the HRMS's whose every ticket this server already named
-    (``said``). One naming no ticket, or a ticket not named — in a project the
-    manager is not on, or one Jira did not show as the applicant's — stays."""
+    (``said``). One naming no ticket, or a ticket not named — not due around
+    the leave, or one Jira did not show as the applicant's — stays."""
     keys = set(_TICKET.findall(line))
     return line.startswith("Jira:") and bool(keys) and keys <= set(_TICKET.findall(said))
 
 
-def _briefing_for_manager(briefing: Any, *, said: str) -> list[str]:
+def _other_project(line: str, checked: set[str] | None) -> bool:
+    """A Jira line of the HRMS's naming a ticket outside the Jira projects read
+    for the manager (``checked``): another project's work, which is never
+    theirs to be shown. With nothing read, the HRMS's own scoping stands."""
+    if checked is None or not line.startswith("Jira:"):
+        return False
+    return any(key.rsplit("-", 1)[0] not in checked for key in _TICKET.findall(line))
+
+
+def _briefing_for_manager(
+    briefing: Any, *, said: str, checked: set[str] | None = None
+) -> list[str]:
     """The HRMS's briefing, which is worded to the applicant, said about them.
 
     Its team line stays — nothing above says it to the manager — and its Jira
-    lines go when this server already named every ticket they name (``said``)."""
+    lines go when this server already named every ticket they name (``said``),
+    or when they name a ticket of a project the manager does not decide on."""
     lines = briefing if isinstance(briefing, list) else str(briefing or "").splitlines()
     kept = []
     for line in (str(item).strip() for item in lines):
-        if not line or _said_already(line, said):
+        if not line or _said_already(line, said) or _other_project(line, checked):
             continue
         kept.append(line.replace(" — you attend.", " — they attend.").replace(
             " — you organize.", " — they organize."
@@ -887,69 +912,61 @@ def _briefing_for_manager(briefing: Any, *, said: str) -> list[str]:
     return kept
 
 
-async def _email_of(hrms: Hrms, ctx: Context, name: str) -> str:
-    """The work email of the one employee the HRMS calls exactly this, or "".
-
-    The HRMS names an applicant and nothing more; their email is what finds them
-    in Jira, where their name may be spelt differently."""
-    try:
-        found = await _ask(hrms, ctx, "resolve_employee", {"query": name})
-    except ToolError:
-        return ""
-    same = [
-        p for p in found or []
-        if isinstance(p, dict) and str(p.get("name") or "").casefold() == name.casefold()
-    ]
-    return str(same[0].get("company_email") or "") if len(same) == 1 else ""
-
-
 async def their_jira(
-    hrms: Hrms, jira: Jira | None, ctx: Context, who: str, date_from: str, date_to: str
-) -> list[str] | None:
-    """What Jira says about someone else's leave, or None when Jira was not read.
+    hrms: Hrms, jira: JiraReader | None, ctx: Context, who: str, request_id: str,
+    date_from: str, date_to: str,
+) -> tuple[list[str], set[str] | None] | None:
+    """What Jira says about someone else's leave, and the Jira projects it was
+    read in (None when none was); None when Jira was not read.
 
     Their open tickets — those the leave touches first — and a sprint of theirs
-    that is tight, in the projects of the manager asking — which are the ones
-    the applicant's leave is decided on.
-    The HRMS does not list the applicant's own projects, so it says that any
-    others were not checked."""
-    if jira is None or not jira.configured or who == "Someone":
+    that is tight, as the HRMS read them for the asker: in the projects the asker
+    manages only, which are the ones the leave is decided on here (every one of
+    theirs, for HR). A project of those that is not linked to Jira, or whose
+    Jira did not answer, is said as such — its tickets are unknown, not none."""
+    if jira is None or who == "Someone":
         return None
     try:
         start, end = date.fromisoformat(date_from), date.fromisoformat(date_to)
-        projects = await _ask(hrms, ctx, "get_my_projects", {}) or []
-    except (ToolError, ValueError):
+    except ValueError:
         return None
-    try:
-        session = await _ask(hrms, ctx, "get_user_session", {})
-    except ToolError:
-        session = {}
-    names = [str(p.get("name") or "") for p in projects if isinstance(p, dict)]
-    email = await _email_of(hrms, ctx, who)
-    work, account = await asyncio.gather(
-        jira.work(project_keys(jira.settings, names)), jira.account_of(email)
-    )
-    if not work:
+    session, work = await _session_and_work(hrms, jira, ctx, leave_id=request_id)
+    if work is None:
         return None
     settings = jira.settings
-    checked = ", ".join(p.key for p in work)
-    return [
-        workload.their_work(
-            work, who, start, end, email=email, account=account,
+    said = []
+    if work.projects:
+        said.append(workload.their_work(
+            work.projects, who, start, end, account=work.account,
             today=_today(session),
             after_days=settings.jira_after_leave_days,
             soon_days=settings.jira_leave_soon_days,
-        ),
-        f"Only the asker's own Jira projects were checked ({checked}); any other "
-        f"projects {who} works on were not.",
-        *workload.tight_sprints(
-            work, [who], start, end,
-            tight_days=settings.sprint_tight_days,
-            tight_share=settings.sprint_tight_open_share,
-            email=email,
-            account=account,
-        ),
+        ))
+        if work.view == "managed":
+            # HR sees every project of theirs: only a manager's view leaves some out.
+            said.append(
+                "Only the Jira projects you decide this leave for were checked "
+                f"({', '.join(p.key for p in work.projects)}); any other projects {who} "
+                "works on were not."
+            )
+    if work.not_linked:
+        are = "is" if len(work.not_linked) == 1 else "are"
+        said.append(
+            f"{workload.joined(work.not_linked)} {are} not linked to Jira, so {who}'s "
+            "tickets there could not be checked."
+        )
+    said += [
+        f"{who}'s tickets in {name} could not be checked: {why}." for name, why in work.unreadable
     ]
+    said += workload.tight_sprints(
+        work.projects, [who], start, end,
+        tight_days=settings.sprint_tight_days,
+        tight_share=settings.sprint_tight_open_share,
+        account=work.account,
+    )
+    # With no project read, the HRMS's own briefing — already narrowed to the
+    # asker's projects — is all there is: nothing to narrow it further by.
+    return said, ({p.key for p in work.projects} if work.projects else None)
 
 
 _WEEK = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
