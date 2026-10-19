@@ -672,6 +672,35 @@ def test_the_hrms_jira_lines_stay_when_no_project_of_the_managers_was_read(
     assert "Jira: Ticket ECP-1 is due on 2026-10-01." in said
 
 
+def test_the_applicants_tickets_are_found_by_email_when_no_jira_account_is_given(
+    managing: tuple[TestClient, FakeHrms], jira: FakeJiraWork
+) -> None:
+    """Anu is "anu.r" in Jira: her email finds her tickets where her name does not."""
+    client, hrms = managing
+    hrms.results["resolve_employee"] = [{"name": "Anu", "company_email": "anu@acme.test"}]
+    jira.theirs = [{**_ticket("ECP-1", "anu.r"), "assignee_email": "anu@acme.test"}]
+
+    def without_account(arguments: dict[str, Any]) -> dict[str, Any]:
+        answer = jira(arguments)
+        for project in answer["projects"]:
+            project.pop("account_id", None)
+        return {**answer, "account_id": ""}
+
+    hrms.results["get_jira_work"] = without_account
+    assert "Anu has 1 open Jira ticket in ECP" in text(_impact(client))
+
+
+def test_the_hrms_jira_lines_of_a_project_not_read_this_time_stay(
+    managing: tuple[TestClient, FakeHrms], jira: FakeJiraWork
+) -> None:
+    """Payroll's Jira did not answer: the HRMS's own line about PAY-7 is all
+    that is said of its tickets, so it stays."""
+    client, hrms = managing
+    jira.unreadable = [{"name": "Payroll", "key": "PAY", "reason": "Jira didn't answer"}]
+    hrms.results["get_leave_routing"]["briefing"].append("Jira: Ticket PAY-7 is due on 2026-10-02.")
+    assert "Jira: Ticket PAY-7 is due on 2026-10-02." in text(_impact(client))
+
+
 def test_the_employee_is_warned_of_tickets_jira_files_under_another_name(
     checked: tuple[TestClient, FakeHrms], jira: FakeJiraWork
 ) -> None:
@@ -934,3 +963,13 @@ def test_only_the_askers_own_work_is_kept_and_only_for_someone_named() -> None:
         assert hrms.calls == 5, "no one named, nothing kept to give to another"
 
     asyncio.run(run())
+
+
+class _BrokenHrms(_SlowHrms):
+    async def call(self, tool: str, arguments: dict[str, Any], identity: dict[str, Any]) -> Any:
+        raise AttributeError("'list' object has no attribute 'get'")
+
+
+def test_an_hrms_answer_not_of_the_shape_asked_for_skips_jira_rather_than_fail() -> None:
+    reader = JiraReader(_BrokenHrms())  # type: ignore[arg-type]
+    assert asyncio.run(reader.read(_ctx({"user_id": "emp-1"}))) is None

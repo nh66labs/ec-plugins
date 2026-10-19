@@ -73,6 +73,8 @@ class JiraWork:
     #: Whose view it was read for: "own", "managed" (the asking manager's
     #: projects) or "all" (every project of theirs, for HR).
     view: str = "own"
+    #: The Jira keys of the ``unreadable`` projects, where the HRMS gave them.
+    unreadable_keys: list[str] = field(default_factory=list)
 
 
 def work_of(answer: Any) -> JiraWork | None:
@@ -86,6 +88,10 @@ def work_of(answer: Any) -> JiraWork | None:
         (str(u.get("name") or u.get("key") or ""), str(u.get("reason") or "Jira didn't answer"))
         for u in answer.get("unreadable") or []
         if isinstance(u, dict)
+    ]
+    unreadable_keys = [
+        str(u.get("key")) for u in answer.get("unreadable") or []
+        if isinstance(u, dict) and u.get("key")
     ]
     if not raw and not not_linked and not unreadable:
         return None
@@ -109,7 +115,10 @@ def work_of(answer: Any) -> JiraWork | None:
             ) if sprint and ends else None,
             complete=p.get("complete") is not False,
         ))
-    return JiraWork(projects, account, not_linked, unreadable, str(answer.get("view") or "own"))
+    return JiraWork(
+        projects, account, not_linked, unreadable, str(answer.get("view") or "own"),
+        unreadable_keys,
+    )
 
 
 @dataclass
@@ -151,6 +160,10 @@ class JiraReader:
         except (HrmsError, TimeoutError):
             # Only that it was skipped — never the identity or the answer.
             log.info("jira work skipped: the HRMS did not say in time")
+            return None
+        except Exception:
+            # An answer not of the shape asked for: still never the leave check's end.
+            log.warning("jira work skipped: the HRMS's answer could not be read")
             return None
         work = work_of(answer)
         if work is not None and keep:
