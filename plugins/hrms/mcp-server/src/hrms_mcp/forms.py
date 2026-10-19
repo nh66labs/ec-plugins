@@ -33,7 +33,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
 from hrms_mcp.hrms import Hrms
-from hrms_mcp.jira import Jira
+from hrms_mcp.jira_work import JiraReader
 from hrms_mcp.tools import (
     HeadsUp,
     _ask,
@@ -157,7 +157,7 @@ _LATE: set[asyncio.Task[HeadsUp | None]] = set()
 
 
 async def _read_heads_up(
-    hrms: Hrms, jira: Jira | None, ctx: Context, date_from: str, date_to: str
+    hrms: Hrms, jira: JiraReader | None, ctx: Context, date_from: str, date_to: str
 ) -> HeadsUp | None:
     """``own_heads_up``, or None when anything goes wrong. A slow Jira, or an
     HRMS that answers oddly, never fails the form: the check before Confirm
@@ -184,7 +184,7 @@ async def _heads_up(reading: asyncio.Task[HeadsUp | None]) -> HeadsUp | None:
         return None
 
 
-def register(server: MCPServer, hrms: Hrms, jira: Jira | None = None) -> None:
+def register(server: MCPServer, hrms: Hrms, jira: JiraReader | None = None) -> None:
     @server.tool(annotations=READ_ONLY)
     async def start_leave_request(
         date_from: str,

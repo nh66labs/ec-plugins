@@ -35,6 +35,12 @@
         "not_mention": ["which approver", "now approved"]
       },
       "reference": "An approval card for the request whose line says it is approved by one project manager and still waiting for the asker and a third. Does not say the leave will be approved: once confirmed, the approval is recorded and the leave still waits for the third project manager, who is named."
+    },
+    {
+      "id": "pending-work-in-my-projects-only",
+      "ask": "What Jira work will be left pending by the leave request waiting for me?",
+      "expect": { "outcome": "answered", "no_action": true },
+      "reference": "Names the applicant's open tickets by key and summary in the Jira projects of the projects the asker manages, and names those projects; says any other projects of theirs were not checked. Never names a ticket from a project the asker does not manage, and says a project not linked to Jira could not be checked rather than that it has nothing pending."
     }
   ]
 }
