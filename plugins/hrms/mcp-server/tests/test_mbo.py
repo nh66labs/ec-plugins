@@ -124,7 +124,7 @@ def test_the_handshake_carries_the_mbo_coaching(client) -> None:  # noqa: F811
     assert "exactly three MBOs" in said
     assert "genuinely different" in said
     assert "totalling exactly\n   100" in said
-    assert "Never save before they have agreed a set the criteria guide allows" in said
+    assert "Never save before they agree a set the criteria guide allows" in said
     assert "Only ever discuss the person's own MBOs" in said
     assert "and for the guides its result names" in said
     # A goal the person proposes is judged by the guide, searched and cited: answered
