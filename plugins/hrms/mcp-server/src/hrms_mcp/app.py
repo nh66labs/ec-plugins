@@ -37,7 +37,7 @@ def create_app(
     jira = JiraReader(hrms)
 
     server = MCPServer(
-        "HRMS", instructions=tools.INSTRUCTIONS + "\n" + mbo.INSTRUCTIONS, version="0.17.0"
+        "HRMS", instructions=tools.INSTRUCTIONS + "\n" + mbo.INSTRUCTIONS, version="0.18.0"
     )
     tools.register(server, hrms, jira)
     writes.register(server, hrms)
