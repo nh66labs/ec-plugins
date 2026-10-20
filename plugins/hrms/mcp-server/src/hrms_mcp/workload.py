@@ -43,7 +43,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
-#: How many tickets a sentence names before it says "and N more".
+#: How many tickets ``_named`` names before it says "and N more".
 LISTED = 3
 
 #: How many a project manager is shown: enough to find the one they asked about.
@@ -439,17 +439,14 @@ def _pending_said(
     return "\n\n".join(blocks)
 
 
-#: Longest summary a listed ticket is shown by.
-PENDING_SUMMARY = 70
+#: Longest summary a listed ticket is shown by: room for nearly any title
+#: whole, since one cut short reads as a mistake, but not Jira's full 255.
+PENDING_SUMMARY = 150
 
 
 def _short(summary: str, room: int = PENDING_SUMMARY) -> str:
     summary = " ".join(summary.split())
     return summary if len(summary) <= room else summary[: room - 1].rstrip() + "…"
-
-
-#: Longest summary the early heads-up shows a ticket by; the check shows it whole.
-HEADS_UP_SUMMARY = 40
 
 
 def own_heads_up(
@@ -465,17 +462,18 @@ def own_heads_up(
     soon_days: int = SOON_DAYS,
     limit: int = 220,
 ) -> str:
-    """The person's own tickets this leave touches, said once, briefly, as soon as
-    they name the dates — "Heads-up: you have 2 open Jira tickets to hand over
-    before you go: ECP-1 Fix login and ECP-2 Ship v2. …". Empty when it touches
-    none. Said as a handover, not a due date: some are overdue or have none.
+    """The person's own tickets this leave touches, counted once, as soon as they
+    name the dates — "Heads-up: you have 2 open Jira tickets to hand over before
+    you go. The check before you confirm shows them. You can still apply.".
+    Empty when it touches none. Said as a handover, not a due date: some are
+    overdue or have none.
 
-    The same tickets as ``own_work`` names (``_touched``), in the same order, but
-    only their key and a short summary: it sits above the choices still to make, and the check
-    before Confirm gives each one's status and deadline. Never longer than
-    ``limit``: fewer tickets are listed, then summaries dropped, then the tickets
-    and the closing words, before it would be cut mid-sentence by whatever shows
-    it; empty when even the lead does not fit.
+    The same tickets as ``own_work`` names (``_touched``), but only counted: it
+    sits above the choices still to make, in a prompt too short to name them
+    whole, and the check before Confirm shows them with their status and
+    deadline — read afresh, so it is not promised to list every one. Never
+    longer than ``limit``: the closing words are dropped before it would be cut
+    mid-sentence by whatever shows it; empty when even the lead does not fit.
     """
     touched = _touched(
         projects, name, email, leave_from, leave_to, account, today, after_days, soon_days
@@ -487,24 +485,17 @@ def own_heads_up(
     # A project read only in part may hold more of theirs: the count is a floor.
     if any(not p.complete for p in projects):
         count = f"at least {_tickets(len(named))}"
-    lead = f"Heads-up: you have {count} to hand over before you go"
+    lead = f"Heads-up: you have {count} to hand over before you go."
+    listed = "The check before you confirm shows them."
     close = "You can still apply."
-
-    def short(ticket: Ticket, room: int) -> str:
-        summary = " ".join(ticket.summary.split())
-        if len(summary) > room:
-            summary = summary[: room - 1].rstrip() + "…"
-        return f"{ticket.key} {summary}" if room and summary else ticket.key
-
-    for shown in range(min(len(named), LISTED), 0, -1):
-        for room in (HEADS_UP_SUMMARY, 0):
-            items = [short(t, room) for t in named[:shown]]
-            if len(named) > shown:
-                items.append(f"{len(named) - shown} more")
-            said = f"{lead}: {joined(items)}. {close}"
-            if len(said) <= limit:
-                return said
-    return next((said for said in (f"{lead}. {close}", f"{lead}.") if len(said) <= limit), "")
+    return next(
+        (
+            said
+            for said in (f"{lead} {listed} {close}", f"{lead} {close}", lead)
+            if len(said) <= limit
+        ),
+        "",
+    )
 
 
 def their_work(

@@ -53,7 +53,8 @@ Taking a leave request:
    yourself:
    "today" is today's date, "tomorrow" the day after, "this Thursday" is this
    week's Thursday and "next Tuesday" next week's Tuesday.
-2. Call start_leave_request with the dates and whatever else the person already
+2. Every day a weekend or public holiday? Say so; go on only if they want.
+   Call start_leave_request with the dates and whatever else the person already
    said — the leave type, full or half day, the reason — and nothing they did
    not say. They are shown what is missing as choices, then the request to
    confirm: do not ask them about any of it yourself, and do not call
@@ -389,8 +390,7 @@ def register(server: MCPServer, hrms: Hrms, jira: JiraReader | None = None) -> N
             return "No holidays are recorded for that period."
         lines = []
         for item in holidays:
-            kind = "optional" if item.get("is_optional") else (item.get("type") or "").lower()
-            suffix = f" ({kind})" if kind else ""
+            suffix = f" ({kind})" if (kind := _holiday_kind(item)) else ""
             lines.append(f"{_day(str(item.get('date', '')))} — {item.get('name', '')}{suffix}")
         return "\n".join(lines)
 
@@ -450,7 +450,8 @@ def register(server: MCPServer, hrms: Hrms, jira: JiraReader | None = None) -> N
     async def get_leave_context(ctx: Context) -> str:
         """Who the person asking is, today's date in their timezone, the dates of
         this week and next week, holidays in the next month, their leave balance,
-        and who approves their leave. Call this first whenever leave comes up."""
+        and who approves their leave. Call this first whenever leave comes up.
+        Holidays past those listed: get_holidays, for each month a leave touches."""
         me = await _ask(hrms, ctx, "get_user_session", {})
         if not isinstance(me, dict) or not me.get("authenticated", True):
             raise ToolError("The HRMS could not say who is asking.")
@@ -498,6 +499,12 @@ def register(server: MCPServer, hrms: Hrms, jira: JiraReader | None = None) -> N
         left, and who must approve it. Dates are YYYY-MM-DD; date_to defaults to
         date_from. Call this before apply_leave with the same details. The
         answer is written to the person asking.
+
+        The HRMS's count of days is the company's own and settles it: a leave
+        it counts as 0 days falls wholly on days off — weekends or public
+        holidays — so tell the person they are off already rather than offer it
+        as a request, and one counted as fewer days than it spans takes in
+        some: say which.
 
         The heads-up counts the person's open Jira tickets this leave touches;
         each is listed once, under its project, with what the leave means for
@@ -1032,6 +1039,11 @@ async def their_jira(
 _WEEK = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 
 
+def _holiday_kind(item: dict[str, Any]) -> str:
+    """"optional" or "public" as the HRMS says it: an optional holiday is not a day off."""
+    return "optional" if item.get("is_optional") else (item.get("type") or "").lower()
+
+
 async def _holidays_ahead(hrms: Hrms, ctx: Context, today: str, days: int = 31) -> str:
     """Holidays from today for about a month, across a year boundary if needed."""
     try:
@@ -1047,7 +1059,8 @@ async def _holidays_ahead(hrms: Hrms, ctx: Context, today: str, days: int = 31) 
             except ValueError:
                 continue
             if start.toordinal() <= when.toordinal() <= end:
-                found.append(f"{_day(when.isoformat())} {item.get('name', '')}")
+                kind = f" ({k})" if (k := _holiday_kind(item)) else ""
+                found.append(f"{_day(when.isoformat())} {item.get('name', '')}{kind}")
     return "Holidays in the next month: " + ("; ".join(found) if found else "none") + "."
 
 

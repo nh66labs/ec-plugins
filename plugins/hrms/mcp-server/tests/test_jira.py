@@ -234,14 +234,25 @@ def test_the_warning_counts_and_the_list_names_up_to_ten_a_project() -> None:
     assert pending.endswith("• and 2 more")
 
 
-def test_a_long_summary_is_shortened_in_the_list() -> None:
+def test_a_long_summary_is_listed_whole() -> None:
     long = "Show each manager only their own project's pending tasks with the leave request"
     work = [ProjectWork("ECP", open_tickets=[
         Ticket(key="ECP-1", summary=long, status="To Do", category="new",
                assignee_name="Ravi", due=FRI),
     ])]
     line = own_pending(work, "Ravi", "", FRI, FRI).splitlines()[1]
-    assert "Show each manager only their own project's pending tasks with the lea…" in line
+    assert f"*ECP-1* {long} — To Do" in line and "…" not in line
+
+
+def test_a_summary_past_any_usual_title_is_cut_at_the_cap() -> None:
+    huge = "word " * 60
+    work = [ProjectWork("ECP", open_tickets=[
+        Ticket(key="ECP-1", summary=huge, status="To Do", category="new",
+               assignee_name="Ravi", due=FRI),
+    ])]
+    line = own_pending(work, "Ravi", "", FRI, FRI).splitlines()[1]
+    shown = line.removeprefix("• *ECP-1* ").split(" — ")[0]
+    assert len(shown) <= 150 and shown.endswith("…")
 
 
 def test_the_person_is_found_by_email_before_name() -> None:
@@ -469,28 +480,26 @@ def test_an_answer_naming_no_project_is_jira_not_in_use() -> None:
 def test_the_heads_up_names_only_the_tickets_the_leave_touches() -> None:
     said = own_heads_up(_around_the_leave(), "Ravi", "", NOV12, NOV12, today=FAR)
     assert said == (
-        "Heads-up: you have 2 open Jira tickets to hand over before you go: ECP-1 Task ECP-1 "
-        "and ECP-2 Task ECP-2. You can still apply."
+        "Heads-up: you have 2 open Jira tickets to hand over before you go. "
+        "The check before you confirm shows them. You can still apply."
     )
 
 
 def test_the_heads_up_says_a_handover_not_a_due_date_for_overdue_and_undated_tickets() -> None:
     soon = own_heads_up(_around_the_leave(), "Ravi", "", NOV12, NOV12, today=SOON, limit=400)
-    assert "ECP-5 Task ECP-5" in soon  # overdue
-    assert soon.startswith("Heads-up: you have 5 open Jira tickets to hand over before you go:")
+    # ECP-5, overdue, is counted with the rest.
+    assert soon.startswith("Heads-up: you have 5 open Jira tickets to hand over before you go.")
     assert "due around" not in soon
 
 
-def test_the_heads_up_drops_the_tickets_then_the_close_then_itself_rather_than_be_cut() -> None:
-    lead = "Heads-up: you have 2 open Jira tickets to hand over before you go"
+def test_the_heads_up_drops_its_closing_words_then_itself_rather_than_be_cut() -> None:
+    lead = "Heads-up: you have 2 open Jira tickets to hand over before you go."
     work = _around_the_leave()
-    assert own_heads_up(work, "Ravi", "", NOV12, NOV12, today=FAR, limit=len(lead) + 22) == (
-        f"{lead}. You can still apply."
+    assert own_heads_up(work, "Ravi", "", NOV12, NOV12, today=FAR, limit=len(lead) + 21) == (
+        f"{lead} You can still apply."
     )
-    assert own_heads_up(work, "Ravi", "", NOV12, NOV12, today=FAR, limit=len(lead) + 1) == (
-        f"{lead}."
-    )
-    assert own_heads_up(work, "Ravi", "", NOV12, NOV12, today=FAR, limit=len(lead)) == ""
+    assert own_heads_up(work, "Ravi", "", NOV12, NOV12, today=FAR, limit=len(lead)) == lead
+    assert own_heads_up(work, "Ravi", "", NOV12, NOV12, today=FAR, limit=len(lead) - 1) == ""
 
 
 def test_no_heads_up_when_the_leave_touches_none_of_theirs() -> None:
@@ -499,7 +508,7 @@ def test_no_heads_up_when_the_leave_touches_none_of_theirs() -> None:
     assert own_heads_up(_around_the_leave("Bala"), "Ravi", "", NOV12, NOV12, today=FAR) == ""
 
 
-def test_the_heads_up_lists_fewer_and_shorter_rather_than_be_cut() -> None:
+def test_the_heads_up_counts_long_tickets_rather_than_name_them_cut_short() -> None:
     long = "Migrate the billing exports to the new warehouse and retire the old cron jobs"
     work = [ProjectWork("ECP", open_tickets=[
         Ticket(key=f"ECP-{i}", summary=long, status="To Do", category="new",
@@ -507,8 +516,7 @@ def test_the_heads_up_lists_fewer_and_shorter_rather_than_be_cut() -> None:
         for i in range(1, 6)
     ])]
     roomy = own_heads_up(work, "Ravi", "", NOV12, NOV12, today=FAR, limit=400)
-    assert "ECP-1 Migrate the billing exports to the new… and" not in roomy
-    assert "ECP-3 Migrate the billing exports to the new… and 2 more." in roomy
+    assert "…" not in roomy and "more" not in roomy and "ECP-1" not in roomy
     for limit in (220, 160, 120):
         said = own_heads_up(work, "Ravi", "", NOV12, NOV12, today=FAR, limit=limit)
         assert len(said) <= limit and said.startswith("Heads-up: you have 5 open Jira tickets")
@@ -913,8 +921,8 @@ def test_the_employee_is_told_of_their_tickets_as_soon_as_they_name_the_date(
     client, _ = checked
     form = _start(client)
     assert form["prompt"] == (
-        "Heads-up: you have an open Jira ticket to hand over before you go: ECP-2 Task ECP-2. "
-        "You can still apply.\n\n"
+        "Heads-up: you have an open Jira ticket to hand over before you go. "
+        "The check before you confirm shows them. You can still apply.\n\n"
         "Leave for Fri 2 Oct 2026 — choose the rest:"
     )
     assert len(form["prompt"]) <= PROMPT_LIMIT
@@ -973,7 +981,7 @@ def test_the_check_reads_jira_afresh_so_a_ticket_closed_since_is_not_warned_of(
     checked: tuple[TestClient, FakeHrms], jira: FakeJiraWork
 ) -> None:
     client, _ = checked
-    assert "ECP-2" in _start(client)["prompt"]
+    assert "Jira ticket" in _start(client)["prompt"]
     jira.mine = []  # ECP-2 closed in Jira since
     assert "Jira ticket" not in _preview(client)
 
@@ -1068,8 +1076,11 @@ def test_the_heads_up_is_fitted_to_the_prompt_it_sits_above(
     short = _start(client)
     full = _start(client, leave_type="Floating Leave", day_portion="Second Half")
     assert len(short["prompt"]) <= PROMPT_LIMIT and len(full["prompt"]) <= PROMPT_LIMIT
-    # A shorter prompt leaves more room, and the heads-up takes it.
-    assert len(short["prompt"].split("\n\n")[0]) > len(full["prompt"].split("\n\n")[0])
+    # Counted, not named: nothing in it is cut short to fit.
+    for form in (short, full):
+        heads_up = form["prompt"].split("\n\n")[0]
+        assert heads_up.startswith("Heads-up: you have 6 open Jira tickets")
+        assert "…" not in heads_up and "more" not in heads_up
 
 
 def test_a_failing_heads_up_is_said_as_none_not_raised(

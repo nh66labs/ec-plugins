@@ -368,7 +368,7 @@ def test_the_context_gives_dates_balance_and_approver_without_asking(
     assert "You are Ravi" in said
     assert "Today is Tuesday 2026-09-29, in Asia/Kolkata." in said
     assert "Thursday 2026-10-01" in said and "Tuesday 2026-10-06" in said
-    assert "Gandhi Jayanti" in said
+    assert "Gandhi Jayanti (public)" in said  # an optional one is not a day off
     assert "Casual Leave 10 of 12 days left" in said
     assert "Priya will approve it." in said
 

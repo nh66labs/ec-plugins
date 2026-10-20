@@ -50,6 +50,18 @@
       "reference": "Which day? — the one thing the assistant asks itself."
     },
     {
+      "id": "apply-on-a-sunday-says-already-off",
+      "ask": "Apply a casual leave for the full day this coming Sunday, I have a family function",
+      "expect": { "outcome": "answered", "mention": ["Sunday"], "no_action": true },
+      "reference": "The day is already off: says so instead of opening a request, and leaves applying anyway to the person."
+    },
+    {
+      "id": "apply-on-a-holiday-says-already-off",
+      "ask": "Apply a casual leave for the full day on 25 December, family function",
+      "expect": { "outcome": "answered", "mention": ["Christmas"], "no_action": true },
+      "reference": "A company holiday: names it and says the day is already off, rather than opening a request."
+    },
+    {
       "id": "balance",
       "ask": "What's my leave balance?",
       "expect": { "outcome": "answered", "mention": ["casual"], "no_action": true }
