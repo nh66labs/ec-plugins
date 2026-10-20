@@ -129,7 +129,14 @@ def test_the_handshake_carries_the_mbo_coaching(client) -> None:  # noqa: F811
     assert "and for the guides its result names" in said
     # A goal the person proposes is judged by the guide, searched and cited: answered
     # from the conversation alone, it had no sources and was replaced by "nothing found".
-    assert "Judge any goal they propose by the criteria\n   guide: search it and cite it." in said
+    # So is a change they ask for — "make it only 2 MBOs". In the context read, as
+    # 0.18.2 had it, the rule never reached that later turn: a tool's result is
+    # not carried in the thread, the instructions are. Answered unsourced, the
+    # reply was replaced by "I couldn't find anything".
+    assert (
+        "Judge any goal or change they propose by\n   the criteria guide: search it and cite it."
+        in said
+    )
 
 
 
@@ -503,8 +510,6 @@ def test_a_set_inside_the_quarter_saves(client, mbo_hrms) -> None:  # noqa: F811
     assert mbo_hrms.calls()[-1]["name"] == "save_my_mbo_plan"
 
 
-def test_the_coaching_names_the_quarters_last_day_and_checks_a_change_against_the_guide() -> None:
+def test_the_coaching_names_the_quarters_last_day() -> None:
     lines = "\n".join(mbo.presentation_lines(PLAN, date(2026, 10, 1)))
     assert "never after 15 Dec 2026" in lines
-    assert 'When they ask to change the set (fewer, more or different MBOs), search "MBO' in lines
-    assert "a reply with no source is replaced" in lines

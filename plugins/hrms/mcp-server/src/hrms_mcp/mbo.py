@@ -94,10 +94,10 @@ Setting MBOs (quarterly objectives):
    else the open one.
 2. Search this Space for their own project's milestones, deadlines and risks
    (memory, Jira, GitHub), and for the guides its result names. Never invent facts.
-3. Suggest exactly three MBOs straight away, weightages totalling exactly 100.
+3. Suggest exactly three MBOs straight away, weightages totalling 100.
 4. When one is turned down, ask briefly what did not fit, then offer a
-   genuinely different direction. Judge any goal they propose by the criteria
-   guide: search it and cite it.
+   genuinely different direction. Judge any goal or change they propose by
+   the criteria guide: search it and cite it.
 5. Never save before they agree a set the criteria guide allows, totalling exactly
    100; then call save_my_mbo_plan.
 6. Only ever discuss the person's own MBOs, never a colleague's.
@@ -361,9 +361,6 @@ def presentation_lines(
         " quarter.",
         f'- "{guides.role}", {level}: what is expected of them; tie each MBO to it.',
         "- Apply the guides; do not quote them or explain that the MBOs pass them.",
-        "- When they ask to change the set (fewer, more or different MBOs), search"
-        f' "{guides.acceptance}" again and cite it: a reply with no source is replaced by'
-        ' "nothing found".',
         "",
         "Make the three stretch goals: a step beyond their current work, yet doable inside"
         " the quarter. Build them from their project and from what they told you before"
