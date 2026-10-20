@@ -61,12 +61,11 @@ Taking a leave request:
    date, if they gave none. Never ask about projects, managers or approvers:
    every project manager of theirs must approve, and one rejection rejects it.
 
-When a check has "Pending in Jira" lists, filter them as preview_leave says:
-each is what the manager named above it will see.
+When a check lists Jira tickets under each project, keep that layout.
 
 When a check starts with "Heads-up" — teammates already off, open Jira tickets,
-a tight sprint — tell the person that first, with the ticket keys, and leave the
-choice to them: it is a warning, not a refusal.
+a tight sprint — tell the person that first, and leave the choice to them: it is
+a warning, not a refusal.
 
 Deciding requests (project managers and HR): call list_leave_requests_to_decide
 to find the request, then approve_leave or reject_leave. A rejection needs a
@@ -310,10 +309,12 @@ async def own_heads_up(
 
 async def jira_sentences(
     hrms: Hrms, jira: JiraReader | None, ctx: Context, off: list[str], date_from: str, date_to: str
-) -> tuple[list[str], str] | None:
+) -> tuple[list[str], str, str, set[str]] | None:
     """What Jira says about this leave, or None when Jira was not read: the
-    sentences that warn, and a note said as a plain line when none of the
-    person's open tickets is due around the leave.
+    sentences that warn, the tickets to hand over under each project
+    (``workload.own_pending``), a note said as a plain line when none of the
+    person's open tickets is due around the leave, and the keys of every open
+    ticket of theirs it read — the HRMS's lists name the others.
 
     The person's own open tickets the leave touches, and — when a teammate is already off — any of
     their projects' sprints that is tight (``workload``). Never fails the check:
@@ -327,12 +328,13 @@ async def jira_sentences(
         return None
     work, session, email, account, start, end = read
     settings = jira.settings
-    warning, note = workload.own_work(
-        work, str(session.get("name") or ""), email, start, end, account=account,
-        today=_today(session),
+    whose = dict(
+        projects=work, name=str(session.get("name") or ""), email=email, leave_from=start,
+        leave_to=end, account=account, today=_today(session),
         after_days=settings.jira_after_leave_days,
         soon_days=settings.jira_leave_soon_days,
     )
+    warning, note = workload.own_work(**whose)
     return [
         *workload.tight_sprints(
             work, off, start, end,
@@ -340,7 +342,9 @@ async def jira_sentences(
             tight_share=settings.sprint_tight_open_share,
         ),
         warning,
-    ], note
+    ], workload.own_pending(**whose), note, {
+        ticket.key for _, ticket in workload.own_tickets(work, whose["name"], email, account)
+    }
 
 
 def _today(session: Any) -> date:
@@ -498,16 +502,11 @@ def register(server: MCPServer, hrms: Hrms, jira: JiraReader | None = None) -> N
         date_from. Call this before apply_leave with the same details. The
         answer is written to the person asking.
 
-        Of the Jira tickets it lists, in its heads-up and its "Pending in Jira"
-        lists alike, name only those in the person's current sprint and due on
-        or after the leave's first day. Each "Pending in Jira" list comes under
-        a project manager's name and holds only the projects that manager
-        manages: keep each list under its own manager. Leave out one due before
-        the leave starts, even if still open: a ticket due Oct 15 or Oct 20 is
-        not named for a leave from Nov 7. Leave out one with no due date, or in
-        no current sprint. When none is left, say none of their current
-        sprint's tickets fall due on or after the leave; do not list or count
-        the ones left out."""
+        The heads-up counts the person's open Jira tickets this leave touches;
+        each is listed once, under its project, with what the leave means for
+        it. Show them as listed, under their project, and add none. A "Pending
+        in Jira" list holds tickets Jira could not be checked for here: of it,
+        name only those due on or after the leave's first day."""
         result = await _ask(
             hrms,
             ctx,
@@ -537,29 +536,29 @@ def register(server: MCPServer, hrms: Hrms, jira: JiraReader | None = None) -> N
         except BaseException:
             reading.cancel()
             raise
-        jira_warnings, jira_note = await reading or ([], "")
+        read = await reading
+        jira_warnings, pending, jira_note, known = read or ([], "", "", None)
+        # The HRMS's own lists, once per project: all of them when Jira was not
+        # read here, else those naming a ticket it did not find as theirs.
+        hrms_lists = pending_by_project(str(result.get("pending_jira") or ""), known)
+        pending = "\n\n".join(p for p in (pending, hrms_lists) if p)
         warning = warning_of(
             [teammates_sentence(off, date_from, until), *jira_warnings, balance if short else ""]
         )
-        parts = [p for p in (warning, head) if p]
-        if balance and not short:
-            parts.append(balance)
-        # The HRMS's own lists of their open tickets, as each project manager's
-        # card will show them: said as they are, so all read the same.
-        if pending := str(result.get("pending_jira") or "").strip():
-            parts.append(pending)
-        if jira_note:
-            parts.append(jira_note)
-        parts.extend(
+        # Sections a blank line apart: the warning, the request, the tickets,
+        # the HRMS's own lines, who decides.
+        sections = [warning, "\n".join(p for p in (head, "" if short else balance) if p)]
+        sections.append("\n".join(p for p in (pending, jira_note) if p))
+        said = "\n".join(sections)
+        sections.append("\n".join(
             line
-            for line in _briefing_lines(result.get("briefing"), said="\n".join(parts))
+            for line in _briefing_lines(result.get("briefing"), said=said)
             # Said above in the person's words; the HRMS's own line only without it,
             # or when it says more — that the excess is unpaid, say.
             if not (balance and _plain_balance(line))
-        )
-        parts.append(approvers)
-        parts.append("Nothing is filed until you confirm.")
-        return "\n".join(parts)
+        ))
+        sections.append(f"{approvers}\nNothing is filed until you confirm.")
+        return "\n\n".join(s for s in sections if s)
 
     @server.tool(annotations=READ_ONLY, structured_output=False)
     async def list_leave_requests_to_decide(
@@ -874,6 +873,39 @@ async def _routing(hrms: Hrms, ctx: Context, leave_id: str) -> dict[str, Any]:
 
 
 _TICKET = re.compile(r"\b[A-Z][A-Z0-9_]*-\d+\b")
+
+
+#: The line the HRMS heads each manager's lists by: "_Priya will see:_".
+_WILL_SEE = re.compile(r"_?[^•\n]+ will see:_?")
+
+
+def _manager_line(line: str) -> bool:
+    """Whether a line of the HRMS's lists only names whose they are — never a
+    ticket's line, whatever its summary ends in."""
+    return bool(_WILL_SEE.fullmatch(line)) and not _TICKET.search(line)
+
+
+def pending_by_project(pending: str, known: set[str] | None = None) -> str:
+    """The HRMS's "Pending in Jira" lists of the person's open tickets, written
+    once per project manager under "_<manager> will see:_", said once per
+    project instead: the manager lines dropped, and a project that two managers
+    share listed once. With ``known`` — the tickets Jira was read for here and
+    listed by project already — only a list naming a ticket outside it is kept."""
+    lists: list[list[str]] = []
+    for line in pending.strip().splitlines():
+        line = line.strip()
+        if not line or _manager_line(line):
+            continue
+        if "Pending in Jira" in line or not lists:
+            lists.append([])
+        lists[-1].append(line)
+    kept: list[str] = []
+    for said in ("\n".join(lines) for lines in lists):
+        if said in kept:
+            continue
+        if known is None or set(_TICKET.findall(said)) - known:
+            kept.append(said)
+    return "\n\n".join(kept)
 
 
 def _said_already(line: str, said: str) -> bool:

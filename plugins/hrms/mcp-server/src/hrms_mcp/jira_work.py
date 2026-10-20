@@ -114,6 +114,7 @@ def work_of(answer: Any) -> JiraWork | None:
                 tickets=[ticket_of(i) for i in sprint.get("issues") or [] if isinstance(i, dict)],
             ) if sprint and ends else None,
             complete=p.get("complete") is not False,
+            name=str(p.get("name") or ""),
         ))
     return JiraWork(
         projects, account, not_linked, unreadable, str(answer.get("view") or "own"),

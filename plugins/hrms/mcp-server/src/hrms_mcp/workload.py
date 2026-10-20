@@ -99,6 +99,12 @@ class ProjectWork:
     #: False when Jira had more open tickets than were read, so someone's may
     #: be among those that were not.
     complete: bool = True
+    #: Its name in the HRMS ("HOA"), as each manager knows it; the key without one.
+    name: str = ""
+
+    @property
+    def label(self) -> str:
+        return self.name or self.key or "Other"
 
 
 def _day(value: date) -> str:
@@ -253,6 +259,19 @@ def _named(placed: list[_Placed], limit: int, more: str = "more") -> str:
     return joined(shown)
 
 
+def own_tickets(
+    projects: list[ProjectWork], name: str, email: str, account: str = ""
+) -> list[tuple[str, Ticket]]:
+    """The person's own open tickets, each once, with the project it is listed
+    under: the first it is open in, as two HRMS projects may share a Jira one."""
+    home: dict[str, tuple[str, Ticket]] = {}
+    for project in projects:
+        for ticket in project.open_tickets:
+            if ticket.open and _is(ticket, name, email, account):
+                home.setdefault(ticket.key, (project.label, ticket))
+    return list(home.values())
+
+
 def _touched(
     projects: list[ProjectWork],
     name: str,
@@ -263,20 +282,33 @@ def _touched(
     today: date | None,
     after_days: int,
     soon_days: int,
-) -> tuple[list[_Placed], int] | None:
-    """The person's own open tickets this leave touches, most pressing first, and
-    how many others of theirs it does not; None when they have no open ticket.
-    What ``own_work`` and ``own_heads_up`` both name, so they name the same."""
-    mine = [t for p in projects for t in p.open_tickets if t.open and _is(t, name, email, account)]
+) -> list[tuple[str, _Placed]] | None:
+    """The person's own open tickets placed against the leave, most pressing
+    first, each with its project (``own_tickets``); None when they have none.
+    What ``own_work``, ``own_pending`` and ``own_heads_up`` all read, so they
+    name the same."""
+    mine = own_tickets(projects, name, email, account)
     if not mine:
         return None
-    placed = _placed(projects, mine, leave_from, leave_to, today, after_days, soon_days, True)
-    named = [p for p in placed if p.where != UNTOUCHED]
-    return named, len(placed) - len(named)
+    where = {ticket.key: label for label, ticket in mine}
+    placed = _placed(
+        projects, [t for _, t in mine], leave_from, leave_to, today, after_days, soon_days, True
+    )
+    return [(where[p.ticket.key], p) for p in placed]
 
 
 def _tickets(count: int) -> str:
     return f"{count} open Jira ticket{'s' if count != 1 else ''}"
+
+
+def _by_project(
+    projects: list[ProjectWork], touched: list[tuple[str, _Placed]]
+) -> dict[str, list[_Placed]]:
+    """``touched`` under each project, in the projects' order."""
+    grouped: dict[str, list[_Placed]] = {p.label: [] for p in projects}
+    for label, item in touched:
+        grouped.setdefault(label, []).append(item)
+    return grouped
 
 
 def own_work(
@@ -291,11 +323,12 @@ def own_work(
     after_days: int = AFTER_DAYS,
     soon_days: int = SOON_DAYS,
 ) -> tuple[str, str]:
-    """The person's own open work, as ``(warning, note)``: the warning names the
-    tickets the leave touches; the note, when it touches none, says the rest were
+    """The person's own open work, as ``(warning, note)``: the warning counts the
+    tickets the leave touches, by project when there is more than one, and
+    ``own_pending`` lists them; the note, when it touches none, says the rest were
     looked at — information, not a reason to think twice. Either may be empty.
     ``today`` unknown, the leave is taken to be far off."""
-    partial = [p.key for p in projects if not p.complete]
+    partial = [p.label for p in projects if not p.complete]
     caveat = (
         f"Only some of the open tickets in {', '.join(partial)} could be read, so some "
         "of yours may not be counted." if partial else ""
@@ -305,20 +338,78 @@ def own_work(
     )
     if touched is None:
         return "", caveat
-    named, rest = touched
+    named = [(label, p) for label, p in touched if p.where != UNTOUCHED]
+    rest = len(touched) - len(named)
     if not named:
         if rest == 1:
             note = "Your 1 open Jira ticket is not due around your leave."
         else:
             note = f"None of your {_tickets(rest)} are due around your leave."
         return "", f"{note} {caveat}".rstrip()
-    warning = (
-        f"You have {_tickets(len(named))} to hand over before you go: {_named(named, LISTED)}."
+    warning = f"You have {_tickets(len(named))} to hand over before you go"
+    split = [(label, len(items)) for label, items in _by_project(projects, named).items() if items]
+    if len(split) > 1:
+        warning += f" — {joined([f'{count} in {label}' for label, count in split])}"
+    return f"{warning}. {caveat}".rstrip(), ""
+
+
+def own_pending(
+    projects: list[ProjectWork],
+    name: str,
+    email: str,
+    leave_from: date,
+    leave_to: date,
+    account: str = "",
+    *,
+    today: date | None = None,
+    after_days: int = AFTER_DAYS,
+    soon_days: int = SOON_DAYS,
+) -> str:
+    """The tickets ``own_work`` counts, listed under the project each is in — the
+    one place they are named — with what the leave means for each:
+
+        *HOA* — 2 to hand over
+        • *ECV-249* Test ticket 1 — To Do, due Tue 27 Oct, the day you're back
+        • *ECV-246* Find employees in Jira — In Progress, no due date
+        + 3 more open, not due around your leave
+
+        Nothing to hand over in Test Project (4 open, none due around your leave).
+
+    Empty when the leave touches none of theirs: ``own_work``'s note says so."""
+    touched = _touched(
+        projects, name, email, leave_from, leave_to, account, today, after_days, soon_days
     )
-    if rest:
-        other = f"{rest} other open ticket{'s' if rest != 1 else ''}"
-        warning += f" {other} of yours {'are' if rest != 1 else 'is'} not due around your leave."
-    return f"{warning} {caveat}".rstrip(), ""
+    if not touched or all(p.where == UNTOUCHED for _, p in touched):
+        return ""
+    blocks, clear = [], []
+    for label, items in _by_project(projects, touched).items():
+        named = [p for p in items if p.where != UNTOUCHED]
+        if not named:
+            clear.append(
+                f"{label} ({len(items)} open, none due around your leave)" if items else label
+            )
+            continue
+        lines = [f"*{label}* — {len(named)} to hand over"]
+        for item in named[:LISTED_FOR_MANAGER]:
+            detail = f"{item.ticket.status}, {item.note}" if item.note else item.ticket.status
+            lines.append(f"• *{item.ticket.key}* {_short(item.ticket.summary)} — {detail}")
+        if len(named) > LISTED_FOR_MANAGER:
+            lines.append(f"• and {len(named) - LISTED_FOR_MANAGER} more")
+        if rest := len(items) - len(named):
+            lines.append(f"+ {rest} more open, not due around your leave")
+        blocks.append("\n".join(lines))
+    if clear:
+        blocks.append(f"Nothing to hand over in {joined(clear)}.")
+    return "\n\n".join(blocks)
+
+
+#: Longest summary a listed ticket is shown by.
+PENDING_SUMMARY = 70
+
+
+def _short(summary: str, room: int = PENDING_SUMMARY) -> str:
+    summary = " ".join(summary.split())
+    return summary if len(summary) <= room else summary[: room - 1].rstrip() + "…"
 
 
 #: Longest summary the early heads-up shows a ticket by; the check shows it whole.
@@ -353,7 +444,7 @@ def own_heads_up(
     touched = _touched(
         projects, name, email, leave_from, leave_to, account, today, after_days, soon_days
     )
-    named = [p.ticket for p in touched[0]] if touched else []
+    named = [p.ticket for _, p in touched or [] if p.where != UNTOUCHED]
     if not named:
         return ""
     count = "an open Jira ticket" if len(named) == 1 else f"{len(named)} open Jira tickets"
