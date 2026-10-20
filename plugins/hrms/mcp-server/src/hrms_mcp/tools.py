@@ -328,13 +328,12 @@ async def jira_sentences(
         return None
     work, session, email, account, start, end = read
     settings = jira.settings
-    whose = dict(
-        projects=work, name=str(session.get("name") or ""), email=email, leave_from=start,
-        leave_to=end, account=account, today=_today(session),
+    warning, pending, note, known = workload.own_check(
+        work, str(session.get("name") or ""), email, start, end, account=account,
+        today=_today(session),
         after_days=settings.jira_after_leave_days,
         soon_days=settings.jira_leave_soon_days,
     )
-    warning, note = workload.own_work(**whose)
     return [
         *workload.tight_sprints(
             work, off, start, end,
@@ -342,9 +341,7 @@ async def jira_sentences(
             tight_share=settings.sprint_tight_open_share,
         ),
         warning,
-    ], workload.own_pending(**whose), note, {
-        ticket.key for _, ticket in workload.own_tickets(work, whose["name"], email, account)
-    }
+    ], pending, note, known
 
 
 def _today(session: Any) -> date:
@@ -549,7 +546,9 @@ def register(server: MCPServer, hrms: Hrms, jira: JiraReader | None = None) -> N
         # the HRMS's own lines, who decides.
         sections = [warning, "\n".join(p for p in (head, "" if short else balance) if p)]
         sections.append("\n".join(p for p in (pending, jira_note) if p))
-        said = "\n".join(sections)
+        # Every ticket of theirs Jira was read for counts as said, listed or not:
+        # the HRMS's line about one not due around the leave says it again.
+        said = "\n".join([*sections, " ".join(sorted(known or ()))])
         sections.append("\n".join(
             line
             for line in _briefing_lines(result.get("briefing"), said=said)
@@ -890,7 +889,8 @@ def pending_by_project(pending: str, known: set[str] | None = None) -> str:
     once per project manager under "_<manager> will see:_", said once per
     project instead: the manager lines dropped, and a project that two managers
     share listed once. With ``known`` — the tickets Jira was read for here and
-    listed by project already — only a list naming a ticket outside it is kept."""
+    listed by project already — only a list naming a ticket outside it is kept,
+    and without the lines of those inside it."""
     lists: list[list[str]] = []
     for line in pending.strip().splitlines():
         line = line.strip()
@@ -900,10 +900,16 @@ def pending_by_project(pending: str, known: set[str] | None = None) -> str:
             lists.append([])
         lists[-1].append(line)
     kept: list[str] = []
-    for said in ("\n".join(lines) for lines in lists):
-        if said in kept:
-            continue
-        if known is None or set(_TICKET.findall(said)) - known:
+    for lines in lists:
+        if known is not None:
+            if not set(_TICKET.findall("\n".join(lines))) - known:
+                continue
+            lines = [
+                line for line in lines
+                if not (keys := set(_TICKET.findall(line))) or not keys <= known
+            ]
+        said = "\n".join(lines)
+        if said not in kept:
             kept.append(said)
     return "\n\n".join(kept)
 

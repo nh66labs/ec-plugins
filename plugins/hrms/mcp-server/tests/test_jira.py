@@ -171,7 +171,25 @@ def test_a_jira_project_two_hrms_projects_share_is_counted_and_listed_once() -> 
     )
     pending = own_pending(work, "Ravi", "", FRI, FRI)
     assert pending.startswith("*HOA* — 2 to hand over\n")
-    assert pending.count("*ECV-1*") == 1 and pending.endswith("Nothing to hand over in Portal.")
+    assert pending.count("*ECV-1*") == 1
+    assert "Portal" not in pending, "its tickets are HOA's: it has not nothing to hand over"
+
+
+def test_nothing_to_hand_over_is_said_only_of_a_project_read_whole_with_tickets_of_theirs(
+) -> None:
+    work = [
+        ProjectWork("ECV", name="HOA", open_tickets=[_t("ECV-1", "Ravi", due=FRI)]),
+        ProjectWork("OPS", name="Ops", open_tickets=[_t("OPS-1", "Bala", due=FRI)]),
+        ProjectWork("PAY", name="Payroll", complete=False,
+                    open_tickets=[_t("PAY-1", "Ravi", due=date(2026, 12, 1))]),
+        ProjectWork("TP", name="Test Project",
+                    open_tickets=[_t("TP-1", "Ravi", due=date(2026, 12, 1))]),
+    ]
+    pending = own_pending(work, "Ravi", "", FRI, FRI)
+    assert pending.endswith(
+        "Nothing to hand over in Test Project (1 open, none due around your leave)."
+    )
+    assert "Ops" not in pending and "Payroll" not in pending
 
 
 def test_a_project_with_no_name_or_key_is_listed_as_other() -> None:
@@ -657,6 +675,26 @@ def test_a_project_is_listed_once_though_the_managers_lists_differ() -> None:
     assert pending_by_project(both) == f"{x}\n\n{y}"
     assert pending_by_project(both, known={"X-1"}) == y
     assert pending_by_project(both, known={"X-1", "Y-1"}) == ""
+
+
+def test_an_hrms_list_kept_for_a_ticket_not_read_drops_those_listed_already() -> None:
+    from hrms_mcp.tools import pending_by_project
+
+    hrms = "*Pending in Jira — Project A (2)*:\n• *ECP-2* Two — To Do\n• *ECP-99* More — To Do"
+    assert pending_by_project(hrms, known={"ECP-2"}) == (
+        "*Pending in Jira — Project A (2)*:\n• *ECP-99* More — To Do"
+    )
+
+
+def test_the_hrms_line_about_a_ticket_of_theirs_not_due_around_the_leave_is_not_said_again(
+    checked: tuple[TestClient, FakeHrms], jira: FakeJiraWork
+) -> None:
+    client, hrms = checked
+    jira.mine = [_ticket("ECP-2", "Ravi"), _ticket("ECP-30", "Ravi", "new", due="2026-12-01")]
+    hrms.results["preview_leave"]["briefing"].append("Jira: Ticket ECP-30 is due on 2026-12-01.")
+    said = _preview(client)
+    assert "ECP-30" not in said
+    assert "+ 1 more open, not due around your leave" in said
 
 
 def test_a_ticket_whose_summary_ends_in_will_see_is_kept() -> None:

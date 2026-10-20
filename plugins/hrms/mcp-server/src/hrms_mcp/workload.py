@@ -259,7 +259,7 @@ def _named(placed: list[_Placed], limit: int, more: str = "more") -> str:
     return joined(shown)
 
 
-def own_tickets(
+def _own_tickets(
     projects: list[ProjectWork], name: str, email: str, account: str = ""
 ) -> list[tuple[str, Ticket]]:
     """The person's own open tickets, each once, with the project it is listed
@@ -284,10 +284,10 @@ def _touched(
     soon_days: int,
 ) -> list[tuple[str, _Placed]] | None:
     """The person's own open tickets placed against the leave, most pressing
-    first, each with its project (``own_tickets``); None when they have none.
+    first, each with its project (``_own_tickets``); None when they have none.
     What ``own_work``, ``own_pending`` and ``own_heads_up`` all read, so they
     name the same."""
-    mine = own_tickets(projects, name, email, account)
+    mine = _own_tickets(projects, name, email, account)
     if not mine:
         return None
     where = {ticket.key: label for label, ticket in mine}
@@ -311,6 +311,29 @@ def _by_project(
     return grouped
 
 
+def own_check(
+    projects: list[ProjectWork],
+    name: str,
+    email: str,
+    leave_from: date,
+    leave_to: date,
+    account: str = "",
+    *,
+    today: date | None = None,
+    after_days: int = AFTER_DAYS,
+    soon_days: int = SOON_DAYS,
+) -> tuple[str, str, str, set[str]]:
+    """The person's own open work for the check before Confirm, read once:
+    ``own_work``'s warning and note, ``own_pending``'s lists, and the keys of
+    every open ticket of theirs that was read — listed or not, said here."""
+    touched = _touched(
+        projects, name, email, leave_from, leave_to, account, today, after_days, soon_days
+    )
+    warning, note = _work_said(projects, touched)
+    keys = {p.ticket.key for _, p in touched or []}
+    return warning, _pending_said(projects, touched), note, keys
+
+
 def own_work(
     projects: list[ProjectWork],
     name: str,
@@ -328,13 +351,18 @@ def own_work(
     ``own_pending`` lists them; the note, when it touches none, says the rest were
     looked at — information, not a reason to think twice. Either may be empty.
     ``today`` unknown, the leave is taken to be far off."""
+    return _work_said(projects, _touched(
+        projects, name, email, leave_from, leave_to, account, today, after_days, soon_days
+    ))
+
+
+def _work_said(
+    projects: list[ProjectWork], touched: list[tuple[str, _Placed]] | None
+) -> tuple[str, str]:
     partial = [p.label for p in projects if not p.complete]
     caveat = (
         f"Only some of the open tickets in {', '.join(partial)} could be read, so some "
         "of yours may not be counted." if partial else ""
-    )
-    touched = _touched(
-        projects, name, email, leave_from, leave_to, account, today, after_days, soon_days
     )
     if touched is None:
         return "", caveat
@@ -375,19 +403,27 @@ def own_pending(
 
         Nothing to hand over in Test Project (4 open, none due around your leave).
 
-    Empty when the leave touches none of theirs: ``own_work``'s note says so."""
-    touched = _touched(
+    "Nothing to hand over" is said only of a project holding open tickets of
+    theirs, every one read: not of one they have none in, nor of one sharing
+    another's Jira project, whose tickets are listed under that one. Empty when
+    the leave touches none of theirs: ``own_work``'s note says so."""
+    return _pending_said(projects, _touched(
         projects, name, email, leave_from, leave_to, account, today, after_days, soon_days
-    )
+    ))
+
+
+def _pending_said(
+    projects: list[ProjectWork], touched: list[tuple[str, _Placed]] | None
+) -> str:
     if not touched or all(p.where == UNTOUCHED for _, p in touched):
         return ""
+    partial = {p.label for p in projects if not p.complete}
     blocks, clear = [], []
     for label, items in _by_project(projects, touched).items():
         named = [p for p in items if p.where != UNTOUCHED]
         if not named:
-            clear.append(
-                f"{label} ({len(items)} open, none due around your leave)" if items else label
-            )
+            if items and label not in partial:
+                clear.append(f"{label} ({len(items)} open, none due around your leave)")
             continue
         lines = [f"*{label}* — {len(named)} to hand over"]
         for item in named[:LISTED_FOR_MANAGER]:
