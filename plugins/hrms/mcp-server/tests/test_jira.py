@@ -27,6 +27,7 @@ from hrms_mcp.workload import (
     Sprint,
     Ticket,
     own_heads_up,
+    own_pending,
     own_work,
     their_work,
     tight_sprints,
@@ -85,21 +86,27 @@ def test_tickets_due_well_before_a_leave_far_off_are_counted_not_named() -> None
 
 def test_a_leave_far_off_names_only_what_is_due_while_away_or_just_after() -> None:
     warning, note = own_work(_around_the_leave(), "Ravi", "", NOV12, NOV12, today=FAR)
-    assert warning == (
-        "You have 2 open Jira tickets to hand over before you go: ECP-1 Task ECP-1 (To Do, "
-        "due Thu 12 Nov, while you're away) and ECP-2 Task ECP-2 (To Do, due Fri 13 Nov, the "
-        "day you're back). 5 other open tickets of yours are not due around your leave."
-    )
+    assert warning == "You have 2 open Jira tickets to hand over before you go."
     assert note == ""
+    assert own_pending(_around_the_leave(), "Ravi", "", NOV12, NOV12, today=FAR) == (
+        "*ECP* — 2 to hand over\n"
+        "• *ECP-1* Task ECP-1 — To Do, due Thu 12 Nov, while you're away\n"
+        "• *ECP-2* Task ECP-2 — To Do, due Fri 13 Nov, the day you're back\n"
+        "+ 5 more open, not due around your leave"
+    )
 
 
 def test_a_leave_soon_also_names_work_due_before_it_and_work_in_progress() -> None:
     warning, _ = own_work(_around_the_leave(), "Ravi", "", NOV12, NOV12, today=SOON)
-    assert warning == (
-        "You have 5 open Jira tickets to hand over before you go: ECP-1 Task ECP-1 (To Do, "
-        "due Thu 12 Nov, while you're away), ECP-2 Task ECP-2 (To Do, due Fri 13 Nov, the day "
-        "you're back), ECP-5 Task ECP-5 (To Do, overdue since Mon 2 Nov) and 2 more. "
-        "2 other open tickets of yours are not due around your leave."
+    assert warning == "You have 5 open Jira tickets to hand over before you go."
+    assert own_pending(_around_the_leave(), "Ravi", "", NOV12, NOV12, today=SOON) == (
+        "*ECP* — 5 to hand over\n"
+        "• *ECP-1* Task ECP-1 — To Do, due Thu 12 Nov, while you're away\n"
+        "• *ECP-2* Task ECP-2 — To Do, due Fri 13 Nov, the day you're back\n"
+        "• *ECP-5* Task ECP-5 — To Do, overdue since Mon 2 Nov\n"
+        "• *ECP-4* Task ECP-4 — In Progress, due Tue 10 Nov, before you go\n"
+        "• *ECP-6* Task ECP-6 — In Progress, no due date\n"
+        "+ 2 more open, not due around your leave"
     )
 
 
@@ -107,26 +114,93 @@ def test_a_ticket_with_no_due_date_takes_the_end_of_its_sprint() -> None:
     sprint = Sprint("Sprint 14", date(2026, 11, 13), [_t("ECP-1", "Ravi")])
     work = [ProjectWork("ECP", open_tickets=[_t("ECP-1", "Ravi")], sprint=sprint)]
     assert own_work(work, "Ravi", "", NOV12, NOV12, today=FAR)[0] == (
-        "You have 1 open Jira ticket to hand over before you go: ECP-1 Task ECP-1 (To Do, no "
-        "due date; sprint “Sprint 14” ends Fri 13 Nov, the day you're back)."
+        "You have 1 open Jira ticket to hand over before you go."
+    )
+    assert own_pending(work, "Ravi", "", NOV12, NOV12, today=FAR).endswith(
+        "• *ECP-1* Task ECP-1 — To Do, no due date; sprint “Sprint 14” ends Fri 13 Nov, "
+        "the day you're back"
     )
 
 
 def test_a_sprint_left_open_past_its_end_is_missed_not_ahead() -> None:
     sprint = Sprint("Sprint 14", date(2026, 11, 2), [_t("ECP-1", "Ravi")])
     work = [ProjectWork("ECP", open_tickets=[_t("ECP-1", "Ravi")], sprint=sprint)]
-    assert own_work(work, "Ravi", "", NOV12, NOV12, today=SOON)[0] == (
-        "You have 1 open Jira ticket to hand over before you go: ECP-1 Task ECP-1 (To Do, no "
-        "due date; sprint “Sprint 14” ended Mon 2 Nov)."
+    assert own_pending(work, "Ravi", "", NOV12, NOV12, today=SOON).endswith(
+        "• *ECP-1* Task ECP-1 — To Do, no due date; sprint “Sprint 14” ended Mon 2 Nov"
     )
 
 
 def test_a_deadline_on_the_weekend_straight_after_the_leave_falls_while_away() -> None:
     work = [ProjectWork("ECP", open_tickets=[_t("ECP-1", "Ravi", due=date(2026, 10, 3))])]
-    assert own_work(work, "Ravi", "", FRI, FRI)[0] == (
-        "You have 1 open Jira ticket to hand over before you go: ECP-1 Task ECP-1 (To Do, "
-        "due Sat 3 Oct, while you're away)."
+    assert own_pending(work, "Ravi", "", FRI, FRI).endswith(
+        "• *ECP-1* Task ECP-1 — To Do, due Sat 3 Oct, while you're away"
     )
+
+
+def test_each_project_is_listed_once_by_its_name_with_the_count_split_by_project() -> None:
+    """Two managers of one project, or one manager of two: each ticket is said
+    once, under its project's HRMS name — never under who will see it."""
+    work = [
+        ProjectWork("ECV", name="HOA", open_tickets=[
+            _t("ECV-1", "Ravi", due=FRI), _t("ECV-2", "Ravi", due=FRI),
+            _t("ECV-3", "Ravi", due=date(2026, 12, 1)),
+        ]),
+        ProjectWork("TP", name="Test Project", open_tickets=[_t("TP-1", "Ravi", due=FRI)]),
+        ProjectWork("OPS", name="Ops", open_tickets=[_t("OPS-1", "Ravi", due=date(2026, 12, 1))]),
+    ]
+    assert own_work(work, "Ravi", "", FRI, FRI)[0] == (
+        "You have 3 open Jira tickets to hand over before you go — 2 in HOA and 1 in Test Project."
+    )
+    assert own_pending(work, "Ravi", "", FRI, FRI) == (
+        "*HOA* — 2 to hand over\n"
+        "• *ECV-1* Task ECV-1 — To Do, due Fri 2 Oct, while you're away\n"
+        "• *ECV-2* Task ECV-2 — To Do, due Fri 2 Oct, while you're away\n"
+        "+ 1 more open, not due around your leave\n\n"
+        "*Test Project* — 1 to hand over\n"
+        "• *TP-1* Task TP-1 — To Do, due Fri 2 Oct, while you're away\n\n"
+        "Nothing to hand over in Ops (1 open, none due around your leave)."
+    )
+
+
+def test_a_jira_project_two_hrms_projects_share_is_counted_and_listed_once() -> None:
+    tickets = [_t("ECV-1", "Ravi", due=FRI), _t("ECV-2", "Ravi", due=FRI)]
+    work = [ProjectWork("ECV", name="HOA", open_tickets=tickets),
+            ProjectWork("ECV", name="Portal", open_tickets=tickets)]
+    assert own_work(work, "Ravi", "", FRI, FRI)[0] == (
+        "You have 2 open Jira tickets to hand over before you go."
+    )
+    pending = own_pending(work, "Ravi", "", FRI, FRI)
+    assert pending.startswith("*HOA* — 2 to hand over\n")
+    assert pending.count("*ECV-1*") == 1
+    assert "Portal" not in pending, "its tickets are HOA's: it has not nothing to hand over"
+
+
+def test_nothing_to_hand_over_is_said_only_of_a_project_read_whole_with_tickets_of_theirs(
+) -> None:
+    work = [
+        ProjectWork("ECV", name="HOA", open_tickets=[_t("ECV-1", "Ravi", due=FRI)]),
+        ProjectWork("OPS", name="Ops", open_tickets=[_t("OPS-1", "Bala", due=FRI)]),
+        ProjectWork("PAY", name="Payroll", complete=False,
+                    open_tickets=[_t("PAY-1", "Ravi", due=date(2026, 12, 1))]),
+        ProjectWork("TP", name="Test Project",
+                    open_tickets=[_t("TP-1", "Ravi", due=date(2026, 12, 1))]),
+    ]
+    pending = own_pending(work, "Ravi", "", FRI, FRI)
+    assert pending.endswith(
+        "Nothing to hand over in Test Project (1 open, none due around your leave)."
+    )
+    assert "Ops" not in pending and "Payroll" not in pending
+
+
+def test_a_project_with_no_name_or_key_is_listed_as_other() -> None:
+    work = [ProjectWork("", open_tickets=[_t("X-1", "Ravi", due=FRI)])]
+    assert own_pending(work, "Ravi", "", FRI, FRI).startswith("*Other* — 1 to hand over")
+
+
+def test_nothing_is_listed_when_the_leave_touches_none_of_theirs() -> None:
+    far_off = [ProjectWork("ECP", open_tickets=[_t("ECP-3", "Ravi", due=date(2026, 11, 18))])]
+    assert own_pending(far_off, "Ravi", "", NOV12, NOV12, today=FAR) == ""
+    assert own_pending(far_off[:0], "Ravi", "", NOV12, NOV12, today=FAR) == ""
 
 
 def test_own_work_says_when_not_every_open_ticket_was_read() -> None:
@@ -144,17 +218,30 @@ def test_own_work_says_when_not_every_open_ticket_was_read() -> None:
 
 
 def test_the_operator_sets_how_long_after_the_leave_still_counts() -> None:
-    warning, _ = own_work(
+    pending = own_pending(
         _around_the_leave(), "Ravi", "", NOV12, NOV12, today=FAR, after_days=4
     )
-    assert "ECP-3 Task ECP-3 (To Do, due Wed 18 Nov, just after you're back)" in warning
+    assert "• *ECP-3* Task ECP-3 — To Do, due Wed 18 Nov, just after you're back" in pending
 
 
-def test_more_than_three_are_counted_not_listed() -> None:
-    work = [ProjectWork("ECP", open_tickets=[_t(f"ECP-{i}", "Ravi", due=FRI) for i in range(5)])]
-    warning, _ = own_work(work, "Ravi", "", FRI, FRI)
-    assert warning.count("while you're away)") == 3
-    assert "and 2 more." in warning
+def test_the_warning_counts_and_the_list_names_up_to_ten_a_project() -> None:
+    work = [ProjectWork("ECP", open_tickets=[_t(f"ECP-{i}", "Ravi", due=FRI) for i in range(12)])]
+    assert own_work(work, "Ravi", "", FRI, FRI)[0] == (
+        "You have 12 open Jira tickets to hand over before you go."
+    )
+    pending = own_pending(work, "Ravi", "", FRI, FRI)
+    assert pending.count("while you're away") == 10
+    assert pending.endswith("• and 2 more")
+
+
+def test_a_long_summary_is_shortened_in_the_list() -> None:
+    long = "Show each manager only their own project's pending tasks with the leave request"
+    work = [ProjectWork("ECP", open_tickets=[
+        Ticket(key="ECP-1", summary=long, status="To Do", category="new",
+               assignee_name="Ravi", due=FRI),
+    ])]
+    line = own_pending(work, "Ravi", "", FRI, FRI).splitlines()[1]
+    assert "Show each manager only their own project's pending tasks with the lea…" in line
 
 
 def test_the_person_is_found_by_email_before_name() -> None:
@@ -476,10 +563,15 @@ def test_the_check_warns_once_with_the_teammate_the_sprint_and_the_persons_ticke
         "Heads-up: Anu has already applied for leave on the same day. ECP's sprint "
         "“Sprint 14” ends on Mon 5 Oct with 6 of 10 tickets still to "
         "do or in progress, including Anu's ECP-1 Task ECP-1 (In Progress). You have 1 open "
-        "Jira ticket to hand over before you go: ECP-2 Task ECP-2 (In Progress, no due date; "
-        "sprint “Sprint 14” ends Mon 5 Oct, the day you're back). Do you still want to proceed?"
+        "Jira ticket to hand over before you go. Do you still want to proceed?"
     )
-    assert "Jira: Ticket" not in said, "said once, in the warning"
+    assert (
+        "*EC Platform* — 1 to hand over\n"
+        "• *ECP-2* Task ECP-2 — In Progress, no due date; sprint “Sprint 14” ends Mon 5 Oct, "
+        "the day you're back"
+    ) in said
+    assert said.count("*ECP-2*") == 1, "said once, under its project"
+    assert "Jira: Ticket" not in said
     assert "Balance: 10.0" in said and "Nothing is filed until you confirm." in said
     assert _jira_reads(hrms) == [{}], "the person's own work, asked of the HRMS"
 
@@ -523,17 +615,104 @@ def test_the_hrms_jira_lines_about_tickets_not_named_stay_for_the_applicant(
     assert "Jira: 2 open tickets due this week." in said, "its projects are unknown"
 
 
-def test_the_employee_is_shown_each_managers_pending_list_as_the_hrms_gives_it(
+#: The HRMS's lists, one per manager: Priya and Arun share Project A.
+HRMS_PENDING = (
+    "_Priya will see:_\n*Pending in Jira — Project A (1)* — open tickets assigned to Ravi:\n"
+    "• *ECP-2* Task ECP-2 — In Progress\n\n"
+    "_Arun will see:_\n*Pending in Jira — Project A (1)* — open tickets assigned to Ravi:\n"
+    "• *ECP-2* Task ECP-2 — In Progress\n\n"
+    "_Maya will see:_\n*Pending in Jira:* no open tickets in Project B assigned to Ravi."
+)
+
+
+def test_the_hrms_lists_by_manager_are_not_shown_when_jira_was_read_here(
     checked: tuple[TestClient, FakeHrms],
 ) -> None:
     client, hrms = checked
-    pending = (
-        "_Priya will see:_\n*Pending in Jira — Project A (1)* — open tickets assigned to Ravi:\n"
+    hrms.results["preview_leave"]["pending_jira"] = HRMS_PENDING
+    said = _preview(client)
+    assert "will see" not in said and "Pending in Jira" not in said
+    assert said.count("*ECP-2*") == 1
+
+
+def test_without_jira_the_hrms_lists_are_said_once_per_project(
+    checked: tuple[TestClient, FakeHrms],
+) -> None:
+    client, hrms = checked
+    hrms.errors["get_jira_work"] = "Jira is not answering."
+    hrms.results["preview_leave"]["pending_jira"] = HRMS_PENDING
+    said = _preview(client)
+    assert "will see" not in said
+    assert (
+        "*Pending in Jira — Project A (1)* — open tickets assigned to Ravi:\n"
         "• *ECP-2* Task ECP-2 — In Progress\n\n"
-        "_Arun will see:_\n*Pending in Jira:* no open tickets in Project B assigned to Ravi."
+        "*Pending in Jira:* no open tickets in Project B assigned to Ravi."
+    ) in said
+    assert said.count("Project A") == 1
+
+
+def test_the_hrms_list_of_a_ticket_jira_did_not_show_as_theirs_stays(
+    checked: tuple[TestClient, FakeHrms],
+) -> None:
+    """Payroll's Jira did not answer, or files PAY-7 under another name: the
+    HRMS's list is all that names it, so it stays — the ones read here go."""
+    client, hrms = checked
+    hrms.results["preview_leave"]["pending_jira"] = HRMS_PENDING + (
+        "\n\n_Maya will see:_\n*Pending in Jira — Payroll (1)* — open tickets assigned to Ravi:\n"
+        "• *PAY-7* Close payroll — To Do, due Oct 02"
     )
-    hrms.results["preview_leave"]["pending_jira"] = pending
-    assert pending in _preview(client)
+    said = _preview(client)
+    assert "*Pending in Jira — Payroll (1)* — open tickets assigned to Ravi:\n• *PAY-7*" in said
+    assert "Project A" not in said and "will see" not in said
+
+
+def test_a_project_is_listed_once_though_the_managers_lists_differ() -> None:
+    from hrms_mcp.tools import pending_by_project
+
+    x = "*Pending in Jira — X (1)*:\n• *X-1* One — To Do"
+    y = "*Pending in Jira — Y (1)*:\n• *Y-1* Two — To Do"
+    both = f"_Priya will see:_\n{x}\n\n{y}\n\n_Arun will see:_\n{x}"
+    assert pending_by_project(both) == f"{x}\n\n{y}"
+    assert pending_by_project(both, known={"X-1"}) == y
+    assert pending_by_project(both, known={"X-1", "Y-1"}) == ""
+
+
+def test_an_hrms_list_kept_for_a_ticket_not_read_drops_those_listed_already() -> None:
+    from hrms_mcp.tools import pending_by_project
+
+    hrms = "*Pending in Jira — Project A (2)*:\n• *ECP-2* Two — To Do\n• *ECP-99* More — To Do"
+    assert pending_by_project(hrms, known={"ECP-2"}) == (
+        "*Pending in Jira — Project A (2)*:\n• *ECP-99* More — To Do"
+    )
+
+
+def test_the_hrms_line_about_a_ticket_of_theirs_not_due_around_the_leave_is_not_said_again(
+    checked: tuple[TestClient, FakeHrms], jira: FakeJiraWork
+) -> None:
+    client, hrms = checked
+    jira.mine = [_ticket("ECP-2", "Ravi"), _ticket("ECP-30", "Ravi", "new", due="2026-12-01")]
+    hrms.results["preview_leave"]["briefing"].append("Jira: Ticket ECP-30 is due on 2026-12-01.")
+    said = _preview(client)
+    assert "ECP-30" not in said
+    assert "+ 1 more open, not due around your leave" in said
+
+
+def test_a_ticket_whose_summary_ends_in_will_see_is_kept() -> None:
+    from hrms_mcp.tools import pending_by_project
+
+    said = "*Pending in Jira — X (1)*:\n• *X-1* Decide what the customer will see:"
+    assert pending_by_project(f"_Priya will see:_\n{said}") == said
+
+
+def test_the_hrms_lists_lose_their_manager_lines_however_they_are_spaced() -> None:
+    from hrms_mcp.tools import pending_by_project
+
+    plain = (
+        "Abhijith K K will see:\nPending in Jira — HOA (1):\n• ECV-1 Fix — To Do\n"
+        "Muhammed Nizar K will see:\nPending in Jira — HOA (1):\n• ECV-1 Fix — To Do"
+    )
+    assert pending_by_project(plain) == "Pending in Jira — HOA (1):\n• ECV-1 Fix — To Do"
+    assert pending_by_project("") == ""
 
 
 # -- a project manager asking about someone's leave -----------------------------------------
@@ -706,7 +885,9 @@ def test_the_employee_is_warned_of_tickets_jira_files_under_another_name(
 ) -> None:
     client, _ = checked
     jira.mine = [_ticket("ECP-3", "ravi.k")]
-    assert "You have 1 open Jira ticket to hand over before you go: ECP-3 Task" in _preview(client)
+    said = _preview(client)
+    assert "You have 1 open Jira ticket to hand over before you go." in said
+    assert "• *ECP-3* Task ECP-3" in said
 
 
 def test_open_tickets_the_leave_does_not_touch_are_a_plain_line_not_a_warning(
@@ -715,7 +896,7 @@ def test_open_tickets_the_leave_does_not_touch_are_a_plain_line_not_a_warning(
     client, _ = checked
     jira.mine = [_ticket("ECP-20", "Ravi", "new")]
     said = _preview(client)
-    warning, head, note = said.splitlines()[:3]
+    warning, head, note = said.split("\n\n")[:3]
     assert "Jira ticket" not in warning
     assert head.startswith("Casual leave on Fri 2 Oct 2026")
     assert note == "Your 1 open Jira ticket is not due around your leave."

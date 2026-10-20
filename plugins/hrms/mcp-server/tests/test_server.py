@@ -485,6 +485,7 @@ def test_the_check_speaks_to_the_person_in_plain_sentences(
     assert _check(client).splitlines() == [
         "Casual leave on Fri 9 Oct 2026, full day — 1 day.",
         "You have 5 days of casual leave left — 4 days after this one.",
+        "",
         "It goes to Abhijith K K and Muhammed Nizar K; all of them must approve it, "
         "and one rejection rejects it.",
         "Nothing is filed until you confirm.",
@@ -534,7 +535,7 @@ def test_the_check_words_half_days_ranges_and_a_short_balance(
     }))
     assert said.startswith(
         "Heads-up: You have no sick leave left, and this needs half a day. "
-        "Do you still want to proceed?\n"
+        "Do you still want to proceed?\n\n"
         "Sick leave from Mon 5 Oct 2026 to Tue 6 Oct 2026, first half — half a day."
     )
 
