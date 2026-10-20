@@ -62,6 +62,36 @@
       "reference": "A company holiday: names it and says the day is already off, rather than opening a request."
     },
     {
+      "id": "wfh-asks-only-what-is-missing",
+      "ask": "i need a work from home next Tuesday",
+      "expect": {
+        "outcome": "asked",
+        "action": {
+          "tool": "apply_wfh",
+          "state": "incomplete",
+          "arguments": {},
+          "asks": ["wfh_mode", "reason"]
+        },
+        "not_mention": ["leave type", "casual", "sick", "floating", "employee id", "which manager"]
+      },
+      "reference": "A work-from-home card: the date filled in; WFH mode and reason as choices. No leave type, and no leave card."
+    },
+    {
+      "id": "wfh-complete-goes-to-confirm",
+      "ask": "WFH next Tuesday first half, a plumber is coming home",
+      "expect": {
+        "outcome": "asked",
+        "action": {
+          "tool": "apply_wfh",
+          "state": "proposed",
+          "arguments": { "wfh_mode": "first", "reason": "plumber" },
+          "asks": []
+        },
+        "not_mention": ["leave type", "casual"]
+      },
+      "reference": "Straight to Confirm: work from home, first half, reason plumber; the check says the weekly WFH limit and who approves."
+    },
+    {
       "id": "balance",
       "ask": "What's my leave balance?",
       "expect": { "outcome": "answered", "mention": ["casual"], "no_action": true }

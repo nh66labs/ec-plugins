@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import date
 from typing import Any
 
@@ -68,6 +69,10 @@ def _valid_date(value: str) -> bool:
     except ValueError:
         return False
     return True
+
+
+#: A "leave type" that is working from home, which the HRMS keeps apart from leave.
+_WFH = re.compile(r"\bwfh\b|work[\s-]*(?:from|at)[\s-]*home|\bremote", re.IGNORECASE)
 
 
 def _type_named(leave_type: str) -> str:
@@ -196,8 +201,11 @@ def register(server: MCPServer, hrms: Hrms, jira: JiraReader | None = None) -> N
         # Accepted and ignored, so a call made before every project manager
         # approved still validates: the HRMS sends the request to them all.
         approver: str = "",
+        work_from_home: bool = False,
     ) -> CallToolResult:
         """Start a leave request for the person asking, from what they said.
+        Not for working from home: start_wfh_request. Set work_from_home true
+        whenever they asked to work from home (WFH, remote), and this refuses.
 
         Pass every detail you understood — the dates (YYYY-MM-DD, taken from
         get_leave_context), and the leave type, full or half day and reason if
@@ -216,6 +224,11 @@ def register(server: MCPServer, hrms: Hrms, jira: JiraReader | None = None) -> N
         some are, call it, and say which days are off. Unsure of a day, call
         it: the check before Confirm counts the days the HRMS's way.
         """
+        if work_from_home or _WFH.search(leave_type):
+            raise ToolError(
+                "Working from home is not leave: call start_wfh_request with the same "
+                "dates instead."
+            )
         if not _valid_date(date_from):
             raise ToolError(
                 "A start date (YYYY-MM-DD) is needed. Ask the person which day, "

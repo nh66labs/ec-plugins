@@ -36,7 +36,8 @@ Compare two runs with `python -m app.evals compare BEFORE.json AFTER.json`.
 - **employee-cases**: the employee has one project manager or several (every
   one of them approves, so the form never asks who); a balance of casual
   leave; next Tuesday free of their own leave and of holidays; Sunday a day
-  off, and 25 December a company holiday named Christmas.
+  off, and 25 December a company holiday named Christmas. The `wfh-` cases
+  need no WFH request of theirs already filed for next Tuesday.
 - **manager-cases**: at least one request waiting on the manager.
   `approve-as-one-of-several-approvers` also needs a request filed under
   "every project manager must approve" with three approvers: one who has

@@ -50,17 +50,17 @@ code, name or email, and never pass anyone else's.
 
 Taking a leave request:
 1. Call get_leave_context first, and take dates from it — never work them out
-   yourself:
-   "today" is today's date, "tomorrow" the day after, "this Thursday" is this
-   week's Thursday and "next Tuesday" next week's Tuesday.
+   yourself: "this Thursday" is this week's Thursday and "next Tuesday" next
+   week's Tuesday.
 2. Every day a weekend or public holiday? Say so; go on only if they want.
    Call start_leave_request with the dates and whatever else the person already
    said — the leave type, full or half day, the reason — and nothing they did
-   not say. They are shown what is missing as choices, then the request to
-   confirm: do not ask them about any of it yourself, and do not call
-   preview_leave or apply_leave for it. The only thing to ask yourself is the
-   date, if they gave none. Never ask about projects, managers or approvers:
-   every project manager of theirs must approve, and one rejection rejects it.
+   not say. Work from home (WFH) is not leave: start_wfh_request. They are
+   shown what is missing as choices, then the request to confirm: do not ask
+   them about any of it yourself, nor call the preview or apply tool. The only
+   thing to ask yourself is the date, if they gave none. Never ask about
+   projects, managers or approvers: every project manager of theirs must
+   approve, and one rejection rejects it.
 
 When a check lists Jira tickets under each project, keep that layout.
 
@@ -479,7 +479,9 @@ def register(server: MCPServer, hrms: Hrms, jira: JiraReader | None = None) -> N
         lines.append(await _approvers(hrms, ctx))
         lines.append(
             "Leave types: Casual Leave, Sick Leave, Floating Leave. "
-            "Day portions: Full Day, First Half, Second Half."
+            "Day portions: Full Day, First Half, Second Half. "
+            "Work from home is not leave: start_wfh_request, with a WFH mode of "
+            "Full Day, First Half or Second Half."
         )
         return "\n".join(lines)
 

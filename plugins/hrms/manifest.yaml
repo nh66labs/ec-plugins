@@ -6,8 +6,8 @@
 manifest_version: 2
 plugin_id: hrms
 name: HRMS
-version: 0.18.5
-description: Takes and decides leave requests, answers leave and holiday questions, gives an HRMS administrator an employee's leave trend, and helps people set their quarterly MBOs, in the company's HRMS — as the person asking.
+version: 0.19.0
+description: Takes and decides leave requests, takes work-from-home requests, answers leave and holiday questions, gives an HRMS administrator an employee's leave trend, and helps people set their quarterly MBOs, in the company's HRMS — as the person asking.
 
 # What a person says about themselves while setting MBOs — their interests, what
 # they want to grow into, what they have achieved — kept in a memory of their
@@ -24,6 +24,8 @@ mcp_servers:
       # Reads: run in the turn.
       - get_leave_context
       - start_leave_request
+      - start_wfh_request
+      - preview_wfh
       - get_holidays
       - get_my_leave_balance
       - list_my_leaves
@@ -35,6 +37,7 @@ mcp_servers:
       - get_my_mbo_plan
       # Writes: each proposed to the person, and run only once they confirm.
       - apply_leave
+      - apply_wfh
       - cancel_my_leave
       - approve_leave
       - reject_leave
