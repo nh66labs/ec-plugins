@@ -22,6 +22,7 @@ front of them:
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -343,6 +344,16 @@ def presentation_lines(
             " they want to grow in)? Do not offer to save.",
         ]
     level = f"the part for {designation}" if designation else "the part for their level"
+    # The date itself, not "its last day": live, a certification was still dated
+    # 31 Dec in a quarter ending 15 Dec while the rule named no date.
+    if dates and later:
+        last_day = (
+            f"never after {dates[1]:%d %b %Y} (next quarter's: never after {later[1]:%d %b %Y})"
+        )
+    elif dates:
+        last_day = f"never after {dates[1]:%d %b %Y}"
+    else:
+        last_day = "never after its last day"
     return [
         "Before suggesting, search this Space's memory for the company's MBO guides:",
         f'- "{guides.acceptance}": every MBO must meet it. Without it, use SMART: Specific,'
@@ -350,6 +361,9 @@ def presentation_lines(
         " quarter.",
         f'- "{guides.role}", {level}: what is expected of them; tie each MBO to it.',
         "- Apply the guides; do not quote them or explain that the MBOs pass them.",
+        "- When they ask to change the set (fewer, more or different MBOs), search"
+        f' "{guides.acceptance}" again and cite it: a reply with no source is replaced by'
+        ' "nothing found".',
         "",
         "Make the three stretch goals: a step beyond their current work, yet doable inside"
         " the quarter. Build them from their project and from what they told you before"
@@ -376,8 +390,8 @@ def presentation_lines(
         "  (then 2 and 3 the same way, a blank line before each)",
         "",
         "  <one short closing question>",
-        "- Every KPI date falls inside the quarter worked on, never after its last day; every"
-        " KPI measures only what they control, never a client's or another team's decision.",
+        f"- Every KPI date falls inside the quarter worked on, {last_day}; every KPI"
+        " measures only what they control, never a client's or another team's decision.",
         "- The three weightages total exactly 100. No tables, no other headings; say nothing"
         " twice. Mention no other Slack activity, and do not describe how anything was"
         " looked up.",
@@ -415,6 +429,61 @@ def agreed_set(given: list[tuple[str, str, float]]) -> list[dict[str, Any]]:
     if abs(total - 100) > 0.01:
         raise ToolError(f"The weightages total {total:g}; they must total exactly 100.")
     return rows
+
+
+_MONTHS = {
+    name: number
+    for number, full in enumerate(
+        ("january", "february", "march", "april", "may", "june", "july", "august",
+         "september", "october", "november", "december"),
+        start=1,
+    )
+    for name in (full, full[:3], *(("sept",) if number == 9 else ()))
+}
+_DAY_MONTH_YEAR = re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)\.?,?\s+(\d{4})\b")
+_MONTH_DAY_YEAR = re.compile(r"\b([A-Za-z]+)\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b")
+_ISO = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
+_SLASHED = re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b")
+
+
+def kpi_dates(kpi: str) -> list[date]:
+    """The full dates a KPI names: "15 Dec 2026", "Dec 15, 2026", "2026-12-15" or
+    "15/12/2026" (day first, as the company writes it). A date without a year is
+    left out rather than guessed."""
+    found: list[tuple[int, int, int]] = []
+    for day, month, year in _DAY_MONTH_YEAR.findall(kpi):
+        if month.lower() in _MONTHS:
+            found.append((int(year), _MONTHS[month.lower()], int(day)))
+    for month, day, year in _MONTH_DAY_YEAR.findall(kpi):
+        if month.lower() in _MONTHS:
+            found.append((int(year), _MONTHS[month.lower()], int(day)))
+    found += [(int(y), int(m), int(d)) for y, m, d in _ISO.findall(kpi)]
+    found += [(int(y), int(m), int(d)) for d, m, y in _SLASHED.findall(kpi)]
+    dates: list[date] = []
+    for year, month, day in found:
+        try:
+            dates.append(date(year, month, day))
+        except ValueError:
+            continue
+    return dates
+
+
+def late_kpi(rows: list[dict[str, Any]], last: date) -> str:
+    """Why the set cannot be saved for a quarter ending on ``last``, or "".
+
+    Held here as well as in the coaching: live, the coach dated a KPI 31 Dec in a
+    quarter ending 15 Dec after being told not to. Only the end is checked — a
+    KPI may name the date work started, before the quarter.
+    """
+    for n, row in enumerate(rows, start=1):
+        late = [d for d in kpi_dates(row["kpi"]) if d > last]
+        if late:
+            return (
+                f"MBO {n}'s KPI is dated {late[0]:%d %b %Y}, after the quarter ends on"
+                f" {last:%d %b %Y}. Move it inside the quarter, show the person the"
+                " change and save only once they agree."
+            )
+    return ""
 
 
 def register(server: MCPServer, hrms: Hrms, guides: Guides = DEFAULT_GUIDES) -> None:
@@ -526,6 +595,9 @@ def register(server: MCPServer, hrms: Hrms, guides: Guides = DEFAULT_GUIDES) -> 
             (objective_4, kpi_4, weight_4),
             (objective_5, kpi_5, weight_5),
         ])
+        window = period_dates({"fiscal_year": fiscal_year.strip(), "quarter": quarter})
+        if window and (why := late_kpi(rows, window[1])):
+            raise ToolError(why)
         plan = await _ask(
             hrms, ctx, "save_my_mbo_plan",
             {"fiscal_year": fiscal_year.strip(), "quarter": quarter, "mbos": json.dumps(rows)},
