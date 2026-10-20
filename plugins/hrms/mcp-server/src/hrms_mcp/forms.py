@@ -206,6 +206,15 @@ def register(server: MCPServer, hrms: Hrms, jira: JiraReader | None = None) -> N
         is filed until they confirm. Call this instead of asking them about the
         leave type, full or half day or the reason. Dates are the one thing to
         ask for yourself, if they gave none.
+
+        Look at the dates first: get_leave_context names this week's and next
+        week's days and the holidays ahead; for later dates call get_holidays
+        for each month the leave touches, and never work out a weekday
+        yourself. When every day is already off — a weekend or a public
+        holiday, not an optional one — tell the person so, naming the day or
+        holiday, and call this only if they still want to apply. When only
+        some are, call it, and say which days are off. Unsure of a day, call
+        it: the check before Confirm counts the days the HRMS's way.
         """
         if not _valid_date(date_from):
             raise ToolError(
