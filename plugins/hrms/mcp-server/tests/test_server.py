@@ -173,8 +173,12 @@ READS = {
     "preview_leave", "list_leave_requests_to_decide", "start_leave_request",
     "get_leave_request_impact", "get_leave_trend",
     "get_my_mbo_context", "get_my_mbo_plan",
+    "start_wfh_request", "preview_wfh",
 }
-WRITES = {"apply_leave", "cancel_my_leave", "approve_leave", "reject_leave", "save_my_mbo_plan"}
+WRITES = {
+    "apply_leave", "cancel_my_leave", "approve_leave", "reject_leave", "save_my_mbo_plan",
+    "apply_wfh",
+}
 
 
 def test_every_tool_is_bindable_says_whether_it_writes_and_names_no_person(
@@ -1250,3 +1254,257 @@ def test_a_refusal_carries_no_card(client: TestClient, hrms: FakeHrms, role: str
     _anus_leave(hrms)
     result = call(client, "get_leave_trend", {"employee": "Anu"})
     assert not (result.get("_meta") or {}).get("ec/blocks")
+
+
+# --- working from home: never leave; the mode and reason, as the HRMS's own form ------
+
+
+def _week(used: int, limit: int, asked: int = 1) -> dict[str, Any]:
+    """The HRMS's preview_wfh answer: within its policy when it sets no limit."""
+    within = limit <= 0 or used + asked <= limit
+    return {
+        "within_policy": within,
+        "facts": {
+            "requested_days": asked, "weekly_used_before_this": used, "weekly_limit": limit,
+            "within_policy": within, "team_leaves": {"on_leave_names": []},
+        },
+    }
+
+
+# --- working from home: the form -------------------------------------------------
+
+
+def test_the_form_asks_the_wfh_mode_and_reason_and_never_a_leave_type(
+    client: TestClient,
+) -> None:
+    result = call(client, "start_wfh_request", {"date_from": "2026-10-26"})
+    form = _form(result)
+    assert form["prompt"] == "Work from home on Mon 26 Oct 2026 — choose the rest:"
+    assert form["action"] == {
+        "tool": "apply_wfh",
+        "arguments": {"date_from": "2026-10-26", "date_to": "2026-10-26"},
+    }
+    assert form["check"] == {"tool": "preview_wfh"}
+    assert [q["name"] for q in form["questions"]] == ["wfh_mode", "reason"]
+    assert [o["value"] for o in form["questions"][0]["options"]] == [
+        "Full Day", "First Half", "Second Half",
+    ]
+    assert "do not call apply_wfh" in text(result)
+
+
+def test_a_wfh_mode_said_is_not_asked_again(client: TestClient) -> None:
+    form = _form(call(client, "start_wfh_request", {
+        "date_from": "2026-10-26", "wfh_mode": "first half",
+    }))
+    assert [q["name"] for q in form["questions"]] == ["reason"]
+    assert form["action"]["arguments"]["wfh_mode"] == "First Half"
+    assert form["prompt"] == "Work from home on Mon 26 Oct 2026, first half — choose the rest:"
+
+
+def test_a_complete_wfh_request_asks_nothing(client: TestClient) -> None:
+    form = _form(call(client, "start_wfh_request", {
+        "date_from": "2026-10-26", "date_to": "2026-10-27", "wfh_mode": "Full Day",
+        "reason": "plumber visiting",
+    }))
+    assert form["questions"] == []
+    assert form["prompt"] == "Work from home from Mon 26 Oct 2026 to Tue 27 Oct 2026, full day."
+    assert form["action"]["arguments"] == {
+        "date_from": "2026-10-26", "date_to": "2026-10-27",
+        "wfh_mode": "Full Day", "reason": "plumber visiting",
+    }
+
+
+def test_no_wfh_date_is_for_the_assistant_to_ask(client: TestClient) -> None:
+    result = call(client, "start_wfh_request", {"date_from": ""})
+    assert result["isError"] is True and "start date" in text(result)
+
+
+def test_the_form_reads_no_jira(client: TestClient, hrms: FakeHrms) -> None:
+    call(client, "start_wfh_request", {"date_from": "2026-10-26"})
+    assert _called(hrms, "get_jira_work") == []
+
+
+def test_wfh_is_never_started_as_leave(client: TestClient, hrms: FakeHrms) -> None:
+    for named in ("Work From Home", "wfh", "work-from-home", "Remote"):
+        result = call(client, "start_leave_request", {
+            "date_from": "2026-10-26", "leave_type": named,
+        })
+        assert result["isError"] is True, named
+        assert "start_wfh_request" in text(result)
+    assert _called(hrms, "get_leave_balance") == []
+
+
+def test_wfh_said_only_in_the_reason_is_refused_by_its_flag(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    result = call(client, "start_leave_request", {
+        "date_from": "2026-10-26", "reason": "plumber visiting", "work_from_home": True,
+    })
+    assert result["isError"] is True and "start_wfh_request" in text(result)
+    assert _called(hrms, "get_leave_balance") == []
+
+
+def test_a_leave_whose_reason_says_remote_is_still_leave(client: TestClient) -> None:
+    form = _form(call(client, "start_leave_request", {
+        "date_from": "2026-10-26", "reason": "travelling to a remote village",
+    }))
+    assert form["action"]["tool"] == "apply_leave"
+
+
+def test_the_instructions_send_wfh_to_its_own_request() -> None:
+    from hrms_mcp.tools import INSTRUCTIONS
+
+    said = " ".join(INSTRUCTIONS.split())
+    assert "Work from home (WFH) is not leave: start_wfh_request." in said
+
+
+@pytest.mark.parametrize(("tool", "date_to", "said"), [
+    ("start_wfh_request", "2026-10-3", "not a date"),
+    ("preview_wfh", "2026-10-25", "before the start date"),
+    ("apply_wfh", "2026-10-25", "before the start date"),
+])
+def test_a_wfh_end_date_is_refused_rather_than_guessed(
+    client: TestClient, hrms: FakeHrms, tool: str, date_to: str, said: str
+) -> None:
+    result = call(client, tool, {
+        "date_from": "2026-10-26", "date_to": date_to, "wfh_mode": "Full Day",
+        "reason": "plumber visiting",
+    })
+    assert result["isError"] is True and said in text(result)
+    assert _called(hrms, "apply_wfh") == []
+
+
+def test_wfh_dates_reach_the_hrms_written_out(client: TestClient, hrms: FakeHrms) -> None:
+    hrms.results["apply_wfh"] = {"wfh_id": "w-1", "status": "Pending"}
+    call(client, "apply_wfh", {
+        "date_from": "20261026", "date_to": "2026-10-27", "wfh_mode": "Full Day",
+        "reason": "plumber visiting",
+    })
+    filed = _called(hrms, "apply_wfh")
+    assert [(f["date_from"], f["date_to"]) for f in filed] == [("2026-10-26", "2026-10-27")]
+
+
+# --- the check before Confirm ---------------------------------------------------
+
+
+def test_within_the_weekly_limit_the_check_says_no_count(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    hrms.results["preview_wfh"] = _week(used=0, limit=2)
+    said = text(call(client, "preview_wfh", {
+        "date_from": "2026-10-26", "wfh_mode": "Full Day", "reason": "plumber visiting",
+    }))
+    assert said == (
+        "Work from home on Mon 26 Oct 2026, full day — reason: plumber visiting.\n\n"
+        "Priya will approve it.\nNothing is filed until you confirm."
+    )
+    assert _called(hrms, "preview_wfh") == [{"date_from": "2026-10-26", "date_to": "2026-10-26"}]
+    assert _called(hrms, "apply_wfh") == []
+
+
+def test_past_the_weekly_limit_is_a_heads_up_not_a_refusal(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    hrms.results["preview_wfh"] = _week(used=2, limit=2)
+    said = text(call(client, "preview_wfh", {"date_from": "2026-10-26", "wfh_mode": "First Half"}))
+    assert said.startswith(
+        "Heads-up: This goes over the weekly WFH limit for the week of "
+        "Mon 26 Oct 2026; your managers see it as an exception. "
+        "Do you still want to proceed?\n\n"
+        "Work from home on Mon 26 Oct 2026, first half.\n\n"
+    )
+
+
+def test_the_hrms_verdict_decides_not_a_sum_of_its_counts(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    """Three days asked for, against a limit of two: the HRMS counts requests
+    and says it is within, so nothing is said."""
+    week = _week(used=0, limit=2, asked=3)
+    week["within_policy"] = week["facts"]["within_policy"] = True
+    hrms.results["preview_wfh"] = week
+    said = text(call(client, "preview_wfh", {
+        "date_from": "2026-10-30", "date_to": "2026-11-01", "wfh_mode": "Full Day",
+    }))
+    assert "Heads-up" not in said
+
+
+def test_no_limit_says_nothing_of_one(client: TestClient, hrms: FakeHrms) -> None:
+    hrms.results["preview_wfh"] = _week(used=3, limit=0)
+    said = text(call(client, "preview_wfh", {"date_from": "2026-10-26", "wfh_mode": "Full Day"}))
+    assert "limit" not in said and "Heads-up" not in said
+
+
+def test_a_verdict_the_hrms_did_not_give_says_nothing(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    hrms.results["preview_wfh"] = {"facts": {"weekly_limit": 2, "within_policy": "no"}}
+    said = text(call(client, "preview_wfh", {"date_from": "2026-10-26", "wfh_mode": "Full Day"}))
+    assert said.startswith("Work from home on Mon 26 Oct 2026, full day.\n\nPriya")
+
+
+def test_teammates_off_are_not_said_for_wfh(client: TestClient, hrms: FakeHrms) -> None:
+    week = _week(used=0, limit=2)
+    week["facts"]["team_leaves"] = {"on_leave_names": ["Anu"]}
+    hrms.results["preview_wfh"] = week
+    said = text(call(client, "preview_wfh", {"date_from": "2026-10-26", "wfh_mode": "Full Day"}))
+    assert "Anu" not in said
+
+
+# --- filing --------------------------------------------------------------------------
+
+
+def test_apply_files_it_and_says_who_it_waits_for(client: TestClient, hrms: FakeHrms) -> None:
+    hrms.results["apply_wfh"] = {"wfh_id": "w-1", "status": "Pending"}
+    said = text(call(client, "apply_wfh", {
+        "date_from": "2026-10-26", "wfh_mode": "Second Half", "reason": " plumber visiting ",
+    }))
+    assert said == (
+        "Filed: Work from home, Mon 26 Oct 2026, second half — reason: plumber visiting. "
+        "Status: Pending. It is waiting for Priya to approve."
+    )
+    # As the HRMS names it, and never a project manager: it goes to them all.
+    assert _called(hrms, "apply_wfh") == [{
+        "date_from": "2026-10-26", "date_to": "2026-10-26",
+        "leave_mode": "Second Half", "reason": "plumber visiting",
+    }]
+
+
+def test_applying_for_wfh_twice_files_once(client: TestClient, hrms: FakeHrms) -> None:
+    hrms.results["get_wfh_history"] = [
+        {"wfh_id": "w-1", "date_from": "2026-10-26", "date_to": "2026-10-26",
+         "mode": "Full Day", "status": "Pending", "reason": "plumber visiting"},
+    ]
+    said = text(call(client, "apply_wfh", {
+        "date_from": "2026-10-26", "wfh_mode": "Full Day", "reason": "plumber visiting",
+    }))
+    assert said.startswith("Already filed: work from home, Mon 26 Oct 2026, full day — Pending.")
+    assert _called(hrms, "apply_wfh") == []
+
+
+def test_a_cancelled_one_on_the_same_day_does_not_stop_a_new_one(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    hrms.results["get_wfh_history"] = [
+        {"wfh_id": "w-1", "date_from": "2026-10-26", "date_to": "2026-10-26",
+         "mode": "Full Day", "status": "Cancelled"},
+    ]
+    call(client, "apply_wfh", {
+        "date_from": "2026-10-26", "wfh_mode": "Full Day", "reason": "plumber visiting",
+    })
+    assert len(_called(hrms, "apply_wfh")) == 1
+
+
+def test_a_wfh_request_without_a_reason_is_refused(client: TestClient, hrms: FakeHrms) -> None:
+    result = call(client, "apply_wfh", {
+        "date_from": "2026-10-26", "wfh_mode": "Full Day", "reason": "  ",
+    })
+    assert result["isError"] is True and "reason" in text(result)
+    assert _called(hrms, "apply_wfh") == []
+
+
+def test_the_mode_and_reason_are_required_to_file(client: TestClient) -> None:
+    tools = {t["name"]: t for t in rpc(client, "tools/list").json()["result"]["tools"]}
+    required = tools["apply_wfh"]["inputSchema"]["required"]
+    assert {"date_from", "wfh_mode", "reason"} <= set(required)
+    assert "leave_type" not in tools["apply_wfh"]["inputSchema"]["properties"]
