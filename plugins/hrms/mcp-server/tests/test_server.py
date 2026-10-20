@@ -1374,6 +1374,16 @@ def test_a_wfh_end_date_is_refused_rather_than_guessed(
     assert _called(hrms, "apply_wfh") == []
 
 
+def test_wfh_dates_reach_the_hrms_written_out(client: TestClient, hrms: FakeHrms) -> None:
+    hrms.results["apply_wfh"] = {"wfh_id": "w-1", "status": "Pending"}
+    call(client, "apply_wfh", {
+        "date_from": "20261026", "date_to": "2026-10-27", "wfh_mode": "Full Day",
+        "reason": "plumber visiting",
+    })
+    filed = _called(hrms, "apply_wfh")
+    assert [(f["date_from"], f["date_to"]) for f in filed] == [("2026-10-26", "2026-10-27")]
+
+
 # --- the check before Confirm ---------------------------------------------------
 
 
@@ -1398,7 +1408,7 @@ def test_past_the_weekly_limit_is_a_heads_up_not_a_refusal(
     hrms.results["preview_wfh"] = _week(used=2, limit=2)
     said = text(call(client, "preview_wfh", {"date_from": "2026-10-26", "wfh_mode": "First Half"}))
     assert said.startswith(
-        "Heads-up: This goes over the weekly WFH limit of 2 days for the week of "
+        "Heads-up: This goes over the weekly WFH limit for the week of "
         "Mon 26 Oct 2026; your managers see it as an exception. "
         "Do you still want to proceed?\n\n"
         "Work from home on Mon 26 Oct 2026, first half.\n\n"

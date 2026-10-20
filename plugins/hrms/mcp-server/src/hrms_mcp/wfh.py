@@ -18,13 +18,15 @@ person's project managers.
 
 from __future__ import annotations
 
+import asyncio
+from datetime import date
 from typing import Any, Literal
 
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
-from hrms_mcp.forms import PORTIONS, _portion_named, _valid_date
+from hrms_mcp.forms import PORTIONS, _portion_named
 from hrms_mcp.hrms import Hrms
 from hrms_mcp.tools import _approvers, _ask, day_of, portion_of, warning_of, when_of
 from hrms_mcp.writes import FILES, _waiting_for
@@ -43,41 +45,45 @@ def wfh_line(date_from: str, date_to: str, wfh_mode: str = "") -> str:
     return f"{line}, {portion_of(wfh_mode)}" if wfh_mode else line
 
 
+def _date(value: str) -> date | None:
+    try:
+        return date.fromisoformat(value.strip())
+    except ValueError:
+        return None
+
+
 def dates_of(date_from: str, date_to: str) -> tuple[str, str]:
-    """The request's dates, date_to defaulting to date_from — refused, rather
-    than guessed at, when either cannot be read or the range runs backwards."""
-    if not _valid_date(date_from):
+    """The request's dates as YYYY-MM-DD, date_to defaulting to date_from —
+    refused, rather than guessed at, when either cannot be read or the range
+    runs backwards. Written out again, so "20261026" reaches the HRMS, and the
+    check for a request already filed, as "2026-10-26"."""
+    start = _date(date_from)
+    if start is None:
         raise ToolError(
             "A start date (YYYY-MM-DD) is needed. Ask the person which day, "
             "then call this again."
         )
-    date_to = date_to.strip() or date_from
-    if not _valid_date(date_to):
+    end = _date(date_to) if date_to.strip() else start
+    if end is None:
         raise ToolError(f"The end date {date_to!r} is not a date (YYYY-MM-DD).")
-    if date_to < date_from:
+    if end < start:
         raise ToolError("The end date is before the start date. Ask the person which they meant.")
-    return date_from, date_to
+    return start.isoformat(), end.isoformat()
 
 
 def over_limit(result: Any, date_from: str) -> str:
     """The Heads-up sentence when the HRMS says the request is over its weekly
     WFH limit; else nothing. The HRMS's own verdict, ``within_policy``, decides,
     and no total is named: it counts approved requests, not days, and only the
-    week the request starts in."""
+    week the request starts in — so neither is its limit, which mixes the two."""
     if not isinstance(result, dict):
         return ""
     facts = result.get("facts") if isinstance(result.get("facts"), dict) else {}
     within = result.get("within_policy", facts.get("within_policy"))
     if within is not False:
         return ""
-    limit = facts.get("weekly_limit")
-    of = (
-        f" of {limit} day{'' if limit == 1 else 's'}"
-        if isinstance(limit, int) and not isinstance(limit, bool) and limit > 0
-        else ""
-    )
     return (
-        f"This goes over the weekly WFH limit{of} for the week of {day_of(date_from)}; "
+        f"This goes over the weekly WFH limit for the week of {day_of(date_from)}; "
         "your managers see it as an exception."
     )
 
@@ -162,7 +168,11 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         YYYY-MM-DD; date_to defaults to date_from. Call this before apply_wfh
         with the same details. The answer is written to the person asking."""
         date_from, until = dates_of(date_from, date_to)
-        result = await _ask(hrms, ctx, "preview_wfh", {"date_from": date_from, "date_to": until})
+        # Independent of each other: side by side, the check waits for the slower only.
+        result, approvers = await asyncio.gather(
+            _ask(hrms, ctx, "preview_wfh", {"date_from": date_from, "date_to": until}),
+            _approvers(hrms, ctx),
+        )
         if not isinstance(result, dict):
             return str(result)
         head = wfh_line(date_from, until, wfh_mode)
@@ -170,7 +180,7 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         sections = [
             warning_of([over_limit(result, date_from)]),
             head,
-            f"{await _approvers(hrms, ctx)}\nNothing is filed until you confirm.",
+            f"{approvers}\nNothing is filed until you confirm.",
         ]
         return "\n\n".join(s for s in sections if s)
 

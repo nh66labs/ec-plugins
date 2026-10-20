@@ -89,7 +89,7 @@
         },
         "not_mention": ["leave type", "casual"]
       },
-      "reference": "Straight to Confirm: work from home, first half, reason plumber; the check says the weekly WFH limit and who approves."
+      "reference": "Straight to Confirm: work from home, first half, reason plumber; the check says who approves, and names the weekly WFH limit only when the request goes over it."
     },
     {
       "id": "balance",
