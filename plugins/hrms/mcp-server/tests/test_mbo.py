@@ -299,6 +299,9 @@ def test_a_save_sends_the_agreed_set_as_the_hrms_takes_it(client, mbo_hrms) -> N
         ({"objective_2": "", "kpi_2": "", "weight_2": 0, "objective_3": "x", "kpi_3": "y",
           "weight_3": 40}, "without gaps"),
         ({"quarter": 5}, "quarter must be 1-4"),
+        # Found live: a certification dated after a quarter ending 15 Dec.
+        ({"kpi_2": "Certificate in hand by 31 Dec 2026"}, "after the quarter ends on 15 Dec 2026"),
+        ({"kpi_2": "Done by 2026-12-16"}, "MBO 2's KPI is dated 16 Dec 2026"),
     ],
 )
 def test_an_incomplete_set_is_refused_before_the_hrms(
@@ -463,7 +466,7 @@ def test_the_coaching_reads_and_keeps_what_the_person_said_about_themselves(
     assert "Make the three stretch goals: a step beyond their current work" in said
     # Found live: a KPI dated 31 Dec in a quarter ending 15 Dec, and one that waited on
     # the client's use — both against the criteria guide, corrected only when asked.
-    assert "Every KPI date falls inside the quarter worked on, never after its last day" in said
+    assert "Every KPI date falls inside the quarter worked on, never after" in said
     assert "never a client's or another team's decision" in said
     assert "from their project and from what they told you before (recall_about_me)" in said
     assert "at least one of the three grows it, still tied to their project or role" in said
@@ -471,3 +474,37 @@ def test_the_coaching_reads_and_keeps_what_the_person_said_about_themselves(
     assert "build the next step on it" in said
     assert "keep it with remember_about_me" in said
 
+
+# --- KPI dates (live: a certification dated after the quarter) ----------------------
+
+
+@pytest.mark.parametrize(
+    ("kpi", "dates"),
+    [
+        ("Certificate in hand by 31 Dec 2026", [date(2026, 12, 31)]),
+        ("live by 15th December 2026", [date(2026, 12, 15)]),
+        ("merged by Nov 30, 2026", [date(2026, 11, 30)]),
+        ("by Sept 20 2026", [date(2026, 9, 20)]),
+        ("signed off 2026-12-15", [date(2026, 12, 15)]),
+        ("by 15/12/2026", [date(2026, 12, 15)]),
+        ("Released by 15 Nov", []),
+        ("20 test scenarios passing in CI", []),
+        ("Below 5 open P1 bugs in 2026", []),
+        ("by 31 Feb 2026", []),
+    ],
+)
+def test_the_dates_a_kpi_names_are_read(kpi: str, dates: list[date]) -> None:
+    assert mbo.kpi_dates(kpi) == dates
+
+
+def test_a_set_inside_the_quarter_saves(client, mbo_hrms) -> None:  # noqa: F811
+    result = call(client, "save_my_mbo_plan", {**AGREED, "kpi_1": "Released by 15 Dec 2026"})
+    assert not result.get("isError")
+    assert mbo_hrms.calls()[-1]["name"] == "save_my_mbo_plan"
+
+
+def test_the_coaching_names_the_quarters_last_day_and_checks_a_change_against_the_guide() -> None:
+    lines = "\n".join(mbo.presentation_lines(PLAN, date(2026, 10, 1)))
+    assert "never after 15 Dec 2026" in lines
+    assert 'When they ask to change the set (fewer, more or different MBOs), search "MBO' in lines
+    assert "a reply with no source is replaced" in lines
