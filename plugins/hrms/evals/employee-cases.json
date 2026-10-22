@@ -92,6 +92,30 @@
       "reference": "Straight to Confirm: work from home, first half, reason plumber; the check says who approves, and names the weekly WFH limit only when the request goes over it."
     },
     {
+      "id": "comp-off-for-a-named-holiday-asks-only-the-reason",
+      "ask": "I need a comp-off, I worked on Gandhi Jayanti",
+      "expect": {
+        "outcome": "asked",
+        "action": {
+          "tool": "apply_comp_off",
+          "state": "incomplete",
+          "arguments": {},
+          "asks": ["reason"]
+        },
+        "not_mention": ["leave type", "casual", "already off", "already a holiday"]
+      },
+      "reference": "A comp-off card: the day worked filled in as Gandhi Jayanti; only the reason asked. No leave type, and the holiday is not called a day off."
+    },
+    {
+      "id": "comp-off-without-a-day-offers-or-asks-the-day-worked",
+      "ask": "I need a comp-off",
+      "expect": {
+        "outcome": "asked",
+        "not_mention": ["leave type", "casual", "employee id", "which manager"]
+      },
+      "reference": "Either a comp-off card offering the holidays and weekends worked and not claimed, or — when there are none — the assistant asking which day they worked. Never a leave card."
+    },
+    {
       "id": "balance",
       "ask": "What's my leave balance?",
       "expect": { "outcome": "answered", "mention": ["casual"], "no_action": true }
