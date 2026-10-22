@@ -1809,3 +1809,65 @@ def test_a_check_goes_on_when_a_read_it_can_do_without_fails(
     assert said.endswith(
         "Your project managers will approve it.\nNothing is filed until you confirm."
     )
+
+
+def test_a_check_goes_on_when_the_managers_come_back_in_another_shape(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    _today_is(hrms, "2026-10-22")
+    for shape in ([], "no managers", {"project_managers": "Priya"}):
+        hrms.results["get_employee_project_managers"] = shape
+        said = text(call(client, "preview_comp_off", {"work_date": "2026-10-02"}))
+        assert said.endswith(
+            "Your project managers will approve it.\nNothing is filed until you confirm."
+        ), shape
+
+
+def test_a_day_off_on_the_day_worked_is_a_heads_up(client: TestClient, hrms: FakeHrms) -> None:
+    _today_is(hrms, "2026-10-01")
+    said = text(call(client, "preview_comp_off", {
+        "work_date": "2026-10-14", "off_date": "2026-10-14",
+    }))
+    assert "The day off, Wed 14 Oct 2026, is the day worked." in said
+    assert "before the day worked" not in said
+
+
+def test_a_comp_off_for_several_days_is_not_cut_to_one_quietly(client: TestClient) -> None:
+    result = call(client, "start_leave_request", {
+        "date_from": "2026-11-02", "date_to": "2026-11-04", "leave_type": "Comp Off",
+    })
+    assert result["isError"] is True
+    assert "each day off needs a comp-off of its own" in text(result)
+
+
+def test_a_day_off_given_before_the_day_worked_is_shown_on_the_form(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    hrms.results["get_comp_off_eligibility"] = ELIGIBLE
+    form = _form(call(client, "start_comp_off_request", {"off_date": "2026-11-02"}))
+    assert form["prompt"] == "Comp-off, off on Mon 2 Nov 2026 — choose the rest:"
+    assert form["action"]["arguments"] == {"off_date": "2026-11-02"}
+
+
+def test_a_public_holiday_is_not_hidden_by_an_optional_one_on_the_same_day(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    _today_is(hrms, "2026-10-22")
+    hrms.results["get_holidays"] = [
+        {"date": "2026-11-02", "name": "Diwali", "type": "Public", "is_optional": False},
+        {"date": "2026-11-02", "name": "Govardhan Puja", "type": "Optional", "is_optional": True},
+    ]
+    said = text(call(client, "preview_comp_off", {
+        "work_date": "2026-10-10", "off_date": "2026-11-02",
+    }))
+    assert "The day off, Mon 2 Nov 2026, is already off: Diwali." in said
+
+
+def test_a_comp_off_filed_with_no_status_is_said_as_pending(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    hrms.results["apply_comp_off"] = {"comp_off_id": 12, "status": None}
+    said = text(call(client, "apply_comp_off", {
+        "work_date": "2026-10-02", "reason": "release support",
+    }))
+    assert "Status: Pending. It is waiting for Priya to approve." in said

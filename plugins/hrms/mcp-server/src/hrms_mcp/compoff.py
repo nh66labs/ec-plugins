@@ -30,7 +30,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
 from hrms_mcp.hrms import Hrms
-from hrms_mcp.tools import _approvers, _ask, _today, date_in, day_of, warning_of
+from hrms_mcp.tools import _ask, _today, approvers_sentence, date_in, day_of, warning_of
 from hrms_mcp.writes import FILES, _waiting_for
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False)
@@ -75,12 +75,17 @@ async def _holidays(hrms: Hrms, ctx: Context, *days: date) -> dict[str, dict[str
     calendars = await asyncio.gather(
         *(_ask(hrms, ctx, "get_holidays", {"year": str(year)}) for year in years)
     )
-    return {
-        str(item.get("date", ""))[:10]: item
-        for calendar in calendars
-        for item in calendar or []
-        if isinstance(item, dict)
-    }
+    found: dict[str, dict[str, Any]] = {}
+    for calendar in calendars:
+        for item in calendar if isinstance(calendar, list) else []:
+            if not isinstance(item, dict):
+                continue
+            day = str(item.get("date", ""))[:10]
+            # Two on one date: a public holiday is kept over an optional one,
+            # since the day is then off whatever the optional one says.
+            if day not in found or found[day].get("is_optional"):
+                found[day] = item
+    return found
 
 
 def claimable_as(day: date, holidays: dict[str, dict[str, Any]]) -> str:
@@ -102,6 +107,19 @@ def _already_off(day: date, holidays: dict[str, dict[str, Any]]) -> str:
     if holiday is not None and not holiday.get("is_optional"):
         return str(holiday.get("name") or "a holiday")
     return "a weekend" if day.weekday() >= 5 else ""
+
+
+async def _who_approves(hrms: Hrms, ctx: Context) -> str:
+    """Who must approve, said before it is filed — or "" when the HRMS cannot
+    say, in whatever shape: the check goes on without it."""
+    try:
+        result = await _ask(hrms, ctx, "get_employee_project_managers", {})
+    except ToolError:
+        return ""
+    managers = result.get("project_managers") if isinstance(result, dict) else None
+    if not isinstance(managers, list):
+        return ""
+    return approvers_sentence([m for m in managers if isinstance(m, dict)], filed=False)
 
 
 async def _today_of(hrms: Hrms, ctx: Context) -> date | None:
@@ -146,15 +164,15 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         day off in return for a holiday or weekend they worked. It is not leave:
         never start_leave_request for it.
 
-        Pass work_date — the day worked, YYYY-MM-DD: a holiday named ("I worked
-        on Gandhi Jayanti") is looked up in get_holidays for its year, since
-        get_leave_context lists only the weeks ahead and the day worked is past;
-        a weekday date from get_leave_context — and off_date and the reason only
-        if they said them. With no day worked named, leave
-        it out: the person is offered the holidays and weekends they logged work
-        on. The day worked being a holiday or a weekend is the point: never say
-        it is already off. Do not ask about the reason or the day off yourself,
-        and do not call preview_comp_off or apply_comp_off.
+        Pass work_date — the day worked, YYYY-MM-DD — and off_date and the
+        reason only if they said them. Find a holiday they named ("I worked on
+        Gandhi Jayanti") in get_holidays for its year: the day worked is past,
+        and get_leave_context lists only the weeks ahead. Take the day off from
+        get_leave_context. With no day worked named, leave it out: the person is
+        offered the holidays and weekends they logged work on. The day worked
+        being a holiday or a weekend is the point: never say it is already off.
+        Do not ask about the reason or the day off yourself, and do not call
+        preview_comp_off or apply_comp_off.
         """
         known: dict[str, Any] = {}
         questions: list[dict[str, Any]] = []
@@ -205,6 +223,8 @@ def register(server: MCPServer, hrms: Hrms) -> None:
 
         if "work_date" in known:
             prompt = comp_off_line(known["work_date"], known.get("off_date", ""))
+        elif "off_date" in known:
+            prompt = f"Comp-off, off on {day_of(known['off_date'])}"
         else:
             prompt = "Comp-off"
         prompt += " — choose the rest:" if questions else "."
@@ -260,7 +280,7 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         # already filed before it files.
         holidays, approvers, history, today = await asyncio.gather(
             _or_none(_holidays(hrms, ctx, *(d for d in (worked, off) if d))),
-            _or_none(_approvers(hrms, ctx)),
+            _who_approves(hrms, ctx),
             _or_none(_ask(hrms, ctx, "get_comp_off_history", {})),
             _today_of(hrms, ctx),
         )
@@ -286,7 +306,9 @@ def register(server: MCPServer, hrms: Hrms) -> None:
                 f"{day_of(worked.isoformat())} is not a holiday or a weekend; your managers "
                 "see it as an exception."
             )
-        if off and off < worked:
+        if off and off == worked:
+            warnings.append(f"The day off, {day_of(off.isoformat())}, is the day worked.")
+        elif off and off < worked:
             warnings.append(f"The day off, {day_of(off.isoformat())}, is before the day worked.")
         elif off and today and off < today:
             warnings.append(f"The day off, {day_of(off.isoformat())}, has already passed.")
@@ -335,6 +357,6 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         if off:
             arguments["off_date"] = off.isoformat()
         filed = await _ask(hrms, ctx, "apply_comp_off", arguments)
-        status = filed.get("status", "Pending") if isinstance(filed, dict) else "Pending"
+        status = str((filed.get("status") if isinstance(filed, dict) else "") or "Pending")
         waiting = await _waiting_for(hrms, ctx) if status == "Pending" else ""
         return f"Filed: {what} — reason: {reason.strip()}. Status: {status}.{waiting}"

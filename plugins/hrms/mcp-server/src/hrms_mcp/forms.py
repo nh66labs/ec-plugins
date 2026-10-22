@@ -234,6 +234,14 @@ def register(server: MCPServer, hrms: Hrms, jira: JiraReader | None = None) -> N
                 "dates instead."
             )
         if comp_off or COMP_OFF.search(leave_type):
+            if date_to.strip() and date_to.strip() != date_from.strip():
+                # Never one of the days quietly: the person learns why it is one.
+                raise ToolError(
+                    "A comp-off is not leave, and is one day off for one day worked: "
+                    "tell the person each day off needs a comp-off of its own, and ask "
+                    "which day to start with. Then call start_comp_off_request with the "
+                    "day worked as work_date and that day as off_date."
+                )
             raise ToolError(
                 "A comp-off is not leave: call start_comp_off_request instead, with the "
                 "day worked as work_date and this day as off_date."
