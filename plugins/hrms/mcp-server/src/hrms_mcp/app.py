@@ -19,7 +19,7 @@ from mcp.server.mcpserver import MCPServer
 from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, Response
 
-from hrms_mcp import forms, mbo, tools, wfh, writes
+from hrms_mcp import compoff, forms, mbo, tools, wfh, writes
 from hrms_mcp.auth import BearerAuth
 from hrms_mcp.config import Settings
 from hrms_mcp.hrms import Hrms
@@ -43,6 +43,7 @@ def create_app(
     writes.register(server, hrms)
     forms.register(server, hrms, jira)
     wfh.register(server, hrms)
+    compoff.register(server, hrms)
     mbo.register(
         server, hrms, mbo.Guides.named(settings.mbo_acceptance_guide, settings.mbo_role_guide)
     )

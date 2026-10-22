@@ -33,6 +33,7 @@ from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
+from hrms_mcp.compoff import COMP_OFF
 from hrms_mcp.hrms import Hrms
 from hrms_mcp.jira_work import JiraReader
 from hrms_mcp.tools import (
@@ -202,10 +203,13 @@ def register(server: MCPServer, hrms: Hrms, jira: JiraReader | None = None) -> N
         # approved still validates: the HRMS sends the request to them all.
         approver: str = "",
         work_from_home: bool = False,
+        comp_off: bool = False,
     ) -> CallToolResult:
         """Start a leave request for the person asking, from what they said.
         Not for working from home: start_wfh_request. Set work_from_home true
         whenever they asked to work from home (WFH, remote), and this refuses.
+        Nor for a comp-off: start_comp_off_request. Set comp_off true whenever
+        they asked for one (comp off, compensatory off), and this refuses.
 
         Pass every detail you understood — the dates (YYYY-MM-DD, taken from
         get_leave_context), and the leave type, full or half day and reason if
@@ -228,6 +232,19 @@ def register(server: MCPServer, hrms: Hrms, jira: JiraReader | None = None) -> N
             raise ToolError(
                 "Working from home is not leave: call start_wfh_request with the same "
                 "dates instead."
+            )
+        if comp_off or COMP_OFF.search(leave_type):
+            if date_to.strip() and date_to.strip() != date_from.strip():
+                # Never one of the days quietly: the person learns why it is one.
+                raise ToolError(
+                    "A comp-off is not leave, and is one day off for one day worked: "
+                    "tell the person each day off needs a comp-off of its own, and ask "
+                    "which day to start with. Then call start_comp_off_request with the "
+                    "day worked as work_date and that day as off_date."
+                )
+            raise ToolError(
+                "A comp-off is not leave: call start_comp_off_request instead, with the "
+                "day worked as work_date and this day as off_date."
             )
         if not _valid_date(date_from):
             raise ToolError(

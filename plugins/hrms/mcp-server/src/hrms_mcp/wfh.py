@@ -19,7 +19,6 @@ person's project managers.
 from __future__ import annotations
 
 import asyncio
-from datetime import date
 from typing import Any, Literal
 
 from mcp.server.mcpserver import Context, MCPServer
@@ -28,7 +27,15 @@ from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
 from hrms_mcp.forms import PORTIONS, _portion_named
 from hrms_mcp.hrms import Hrms
-from hrms_mcp.tools import _approvers, _ask, day_of, portion_of, warning_of, when_of
+from hrms_mcp.tools import (
+    _approvers,
+    _ask,
+    dates_of,
+    day_of,
+    portion_of,
+    warning_of,
+    when_of,
+)
 from hrms_mcp.writes import FILES, _waiting_for
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False)
@@ -43,32 +50,6 @@ def wfh_line(date_from: str, date_to: str, wfh_mode: str = "") -> str:
     when = when_of(date_from, date_to)
     line = f"Work from home {'from' if ' to ' in when else 'on'} {when}"
     return f"{line}, {portion_of(wfh_mode)}" if wfh_mode else line
-
-
-def _date(value: str) -> date | None:
-    try:
-        return date.fromisoformat(value.strip())
-    except ValueError:
-        return None
-
-
-def dates_of(date_from: str, date_to: str) -> tuple[str, str]:
-    """The request's dates as YYYY-MM-DD, date_to defaulting to date_from —
-    refused, rather than guessed at, when either cannot be read or the range
-    runs backwards. Written out again, so "20261026" reaches the HRMS, and the
-    check for a request already filed, as "2026-10-26"."""
-    start = _date(date_from)
-    if start is None:
-        raise ToolError(
-            "A start date (YYYY-MM-DD) is needed. Ask the person which day, "
-            "then call this again."
-        )
-    end = _date(date_to) if date_to.strip() else start
-    if end is None:
-        raise ToolError(f"The end date {date_to!r} is not a date (YYYY-MM-DD).")
-    if end < start:
-        raise ToolError("The end date is before the start date. Ask the person which they meant.")
-    return start.isoformat(), end.isoformat()
 
 
 def over_limit(result: Any, date_from: str) -> str:

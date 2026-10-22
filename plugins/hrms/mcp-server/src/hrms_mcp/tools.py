@@ -55,12 +55,12 @@ Taking a leave request:
 2. Every day a weekend or public holiday? Say so; go on only if they want.
    Call start_leave_request with the dates and whatever else the person already
    said — the leave type, full or half day, the reason — and nothing they did
-   not say. Work from home (WFH) is not leave: start_wfh_request. They are
-   shown what is missing as choices, then the request to confirm: do not ask
-   them about any of it yourself, nor call the preview or apply tool. The only
-   thing to ask yourself is the date, if they gave none. Never ask about
-   projects, managers or approvers: every project manager of theirs must
-   approve, and one rejection rejects it.
+   not say. WFH and comp-off are not leave: start_wfh_request, and
+   start_comp_off_request (its day worked is a day off). They are shown what is
+   missing as choices, then the request to confirm: do not ask them any of it
+   yourself, nor call a preview or apply tool. Ask only for the date if they
+   gave none. Never ask about projects, managers or approvers: all their
+   project managers must approve; one rejection rejects it.
 
 When a check lists Jira tickets under each project, keep that layout.
 
@@ -354,6 +354,33 @@ def _today(session: Any) -> date:
         return date.today()
 
 
+def date_in(value: str) -> date | None:
+    """A date the HRMS or the assistant gave, or None when it is not one."""
+    try:
+        return date.fromisoformat(value.strip())
+    except ValueError:
+        return None
+
+
+def dates_of(date_from: str, date_to: str) -> tuple[str, str]:
+    """The request's dates as YYYY-MM-DD, date_to defaulting to date_from —
+    refused, rather than guessed at, when either cannot be read or the range
+    runs backwards. Written out again, so "20261026" reaches the HRMS, and the
+    check for a request already filed, as "2026-10-26"."""
+    start = date_in(date_from)
+    if start is None:
+        raise ToolError(
+            "A start date (YYYY-MM-DD) is needed. Ask the person which day, "
+            "then call this again."
+        )
+    end = date_in(date_to) if date_to.strip() else start
+    if end is None:
+        raise ToolError(f"The end date {date_to!r} is not a date (YYYY-MM-DD).")
+    if end < start:
+        raise ToolError("The end date is before the start date. Ask the person which they meant.")
+    return start.isoformat(), end.isoformat()
+
+
 def when_of(date_from: str, date_to: str) -> str:
     start, end = day_of(date_from), day_of(date_to)
     return start if not date_to or start == end else f"{start} to {end}"
@@ -481,7 +508,7 @@ def register(server: MCPServer, hrms: Hrms, jira: JiraReader | None = None) -> N
             "Leave types: Casual Leave, Sick Leave, Floating Leave. "
             "Day portions: Full Day, First Half, Second Half. "
             "Work from home is not leave: start_wfh_request, with a WFH mode of "
-            "Full Day, First Half or Second Half."
+            "Full Day, First Half or Second Half. Nor is a comp-off: start_comp_off_request."
         )
         return "\n".join(lines)
 
