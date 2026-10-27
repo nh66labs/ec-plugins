@@ -1,0 +1,28 @@
+# Client timesheet: keeps the monthly timesheet a client asks for, for the
+# company's employees placed there (docs/design/client-timesheet.md in the
+# platform). Its capability is the platform's own build; this file only names it.
+#
+# Added to the Space that serves the client. It names the client's Jira (as the
+# project-management plugin does) and, from step 3, the HRMS server's leave read
+# (as the HRMS plugin does). Two plugins may name one server, so neither of
+# those plugins changes.
+#
+# It grows with the build: a manifest naming a tool the build doesn't carry is
+# refused at install, so each part is named here only once the platform has it.
+#   now      the client's Jira, and the roster (client_timesheet)
+#   step 2   tools: builtin:create_timesheet
+#   step 3   mcp_servers: hrms, tools: [get_leave_calendar]
+#   step 7   agents: the Client timesheet agent, and its three monthly schedules
+#            set by the HR admin on its Schedule tab
+manifest_version: 2
+plugin_id: client-timesheet
+name: Client timesheet
+version: 0.1.0
+description: Keeps the monthly timesheet a client asks for, for the company's employees placed there, starting with who is who at the client.
+
+connectors:
+  - connector_id: jira
+
+# The roster of placed employees, uploaded by a Space Admin; later the monthly
+# build and the nudges. A capability the platform's build carries (EC-D321).
+client_timesheet: true

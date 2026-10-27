@@ -30,6 +30,14 @@ plugins:
       # blocks an install; the plugin says it is waiting until it is connected.
       mcp_servers: [hrms]
 
+  - plugin_id: client-timesheet
+    name: Client timesheet
+    summary: Keeps the monthly timesheet a client asks for, for the company's employees placed there, starting with who is who at the client.
+    version: 0.1.0
+    manifest: plugins/client-timesheet/manifest.yaml
+    requires:
+      connectors: [jira]
+
 # MCP servers a plugin needs running beside the platform. Named here so the
 # catalogue can say what to run; nothing here is fetched or executed.
 mcp_servers:
