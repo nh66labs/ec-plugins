@@ -11,14 +11,15 @@
 # refused at install, so each part is named here only once the platform has it.
 #   0.1.0    the client's Jira, and the roster (client_timesheet)
 #   0.2.0    the Client timesheet agent and create_timesheet: the hours
+#   0.3.0    the ticket lists' settings: No Epics, No Estimates, Abandoned
 #   step 3   mcp_servers: hrms, tools: [get_leave_calendar]
 #   step 7   the three monthly schedules, set by the HR admin on the agent's
 #            Schedule tab (a manifest carries no schedule)
 manifest_version: 2
 plugin_id: client-timesheet
 name: Client timesheet
-version: 0.2.0
-description: Keeps the monthly timesheet a client asks for, for the company's employees placed there - who is who at the client, and each person's hours from the client's Jira.
+version: 0.3.0
+description: Keeps the monthly timesheet a client asks for, for the company's employees placed there - who is who at the client, each person's hours from the client's Jira, and the tickets missing an epic, an estimate or a reason.
 
 connectors:
   - connector_id: jira
@@ -45,7 +46,11 @@ agents:
         vendor               = Hamon     (the Vendor column: what the client calls us)
         timezone             = Asia/Kolkata   (the day each worklog counts on)
         most hours in a day  = 8         (above it, a day is an autolog to correct)
-        projects             = CPP, IN, WP, PS, ESM, MT   (the client's projects: the ticket lists)
+        projects             = CPP, IN, WP, PS, ESM, MT   (where No Epics and Abandoned look)
+        estimates needed in  = CPP, IN, ESM, IAM, PLT, MT  (where No Estimates looks)
+        epic not needed for projects  = PS, ESM          (listed, with that reason)
+        epic not needed for summaries = [PROD], [UAT]    (listed, with that reason)
+        abandoned            = Abandoned  (the statuses that mean a ticket was dropped)
 
       **The platform builds the timesheet.** It reads the roster and the
       client's Jira and writes every value. Call create_timesheet once, with no
