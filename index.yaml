@@ -32,8 +32,8 @@ plugins:
 
   - plugin_id: client-timesheet
     name: Client timesheet
-    summary: Keeps the monthly timesheet a client asks for, for the company's employees placed there, starting with who is who at the client.
-    version: 0.1.0
+    summary: Keeps the monthly timesheet a client asks for, for the company's employees placed there - who is who at the client, and each person's hours from the client's Jira.
+    version: 0.2.0
     manifest: plugins/client-timesheet/manifest.yaml
     requires:
       connectors: [jira]

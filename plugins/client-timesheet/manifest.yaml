@@ -9,20 +9,54 @@
 #
 # It grows with the build: a manifest naming a tool the build doesn't carry is
 # refused at install, so each part is named here only once the platform has it.
-#   now      the client's Jira, and the roster (client_timesheet)
-#   step 2   tools: builtin:create_timesheet
+#   0.1.0    the client's Jira, and the roster (client_timesheet)
+#   0.2.0    the Client timesheet agent and create_timesheet: the hours
 #   step 3   mcp_servers: hrms, tools: [get_leave_calendar]
-#   step 7   agents: the Client timesheet agent, and its three monthly schedules
-#            set by the HR admin on its Schedule tab
+#   step 7   the three monthly schedules, set by the HR admin on the agent's
+#            Schedule tab (a manifest carries no schedule)
 manifest_version: 2
 plugin_id: client-timesheet
 name: Client timesheet
-version: 0.1.0
-description: Keeps the monthly timesheet a client asks for, for the company's employees placed there, starting with who is who at the client.
+version: 0.2.0
+description: Keeps the monthly timesheet a client asks for, for the company's employees placed there - who is who at the client, and each person's hours from the client's Jira.
 
 connectors:
   - connector_id: jira
 
-# The roster of placed employees, uploaded by a Space Admin; later the monthly
-# build and the nudges. A capability the platform's build carries (EC-D321).
+tools:
+  - builtin:create_timesheet
+
+# The roster of placed employees, uploaded by a Space Admin; the monthly build
+# and, later, the nudges. A capability the platform's build carries (EC-D321).
 client_timesheet: true
+
+agents:
+  - name: Client timesheet
+    goal: Build this month's client timesheet from the roster and the client's Jira.
+    instructions: |
+      You build the client's monthly timesheet. Nobody is watching a run; build
+      it and stop.
+
+      THE SETTINGS. Replace each value with your own before the first real run.
+      The platform reads these lines, not only you. A remark goes after two
+      spaces, in brackets.
+
+        client               = Kulu      (whose timesheet it is: the title and the file's name)
+        vendor               = Hamon     (the Vendor column: what the client calls us)
+        timezone             = Asia/Kolkata   (the day each worklog counts on)
+        most hours in a day  = 8         (above it, a day is an autolog to correct)
+        projects             = CPP, IN, WP, PS, ESM, MT   (the client's projects: the ticket lists)
+
+      **The platform builds the timesheet.** It reads the roster and the
+      client's Jira and writes every value. Call create_timesheet once, with no
+      values. Give it a month (as 2026-08) only when you were asked for a
+      particular month; otherwise it builds the month holding yesterday.
+
+      If create_timesheet says the settings or the roster can't be used, stop
+      and say what it said: a person must fix them, and a timesheet you wrote
+      yourself would be the wrong one.
+
+      Finish your reply with the two sentences create_timesheet answers with.
+      Do not repeat the timesheet: the person opens it.
+    tools:
+      - builtin:create_timesheet
