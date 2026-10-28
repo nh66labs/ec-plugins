@@ -54,6 +54,19 @@ Compare two runs with `python -m app.evals compare BEFORE.json AFTER.json`.
   `trend-is-laid-out-as-a-card` also needs leave in two months or more of the
   last twelve, and checks the card's fixed labels, not its figures: compare
   those with the result by hand.
-- **employee-cases**' `trend-of-a-colleague-is-refused`: the employee is not an
-  HRMS administrator, and "Dev User" is someone else.
+  The `onboard-` cases need the company email domain to be hamon.in, a
+  designation named "Software Engineer", one company, and no employee — active
+  or deactivated — with ethanparker@hamon.in or the code H901 (change them for
+  another HRMS). Nothing is created: the card is never confirmed.
+  The `onboarding-` cases need an employee being onboarded named Ethan Parker
+  (their status and steps can be anything); nothing is changed, because a card
+  is never confirmed.
+  The `orientation-` cases also need an employee being onboarded named Ethan
+  Parker; `orientation-lists-what-is-waiting` reads whatever is waiting, so it
+  checks the shape of the answer, not its content. Nothing is confirmed.
+- **employee-cases**' `my-onboarding-says-what-is-left`: the employee has an
+  onboarding (one the HR bot started, or one HR started for them).
+- **employee-cases**' `trend-of-a-colleague-is-refused` and
+  `onboarding-is-refused-to-an-employee`: the employee is not an HRMS
+  administrator, and "Dev User" is someone else.
 - Dates are not checked: "next Friday" is worked out on the day of the run.

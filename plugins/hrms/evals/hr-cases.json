@@ -38,6 +38,123 @@
       "ask": "What does my leave pattern look like this year?",
       "expect": { "outcome": "answered", "no_action": true, "not_mention": ["suspicious", "abuse"] },
       "reference": "The asker's own leave this year so far, against the same days of last year."
+    },
+    {
+      "id": "onboard-asks-only-what-is-missing",
+      "ask": "Onboard Ethan Parker ethanparker@hamon.in",
+      "expect": {
+        "outcome": "answered",
+        "no_action": true,
+        "mention": ["employee code", "designation", "joining", "phone"],
+        "not_mention": ["PAN number", "PAN card", "your PAN", "their PAN", "Aadhaar", "Aadhar", "bank account", "date of birth", "shall I go ahead", "employee id"]
+      },
+      "reference": "One short message asking only for the employee code, the designation (the HRMS's designations as choices), the date of joining and a phone number, and their personal email (where the setup email goes). Never the name or company email again, never the status, never the company when there is only one, never PAN, Aadhaar or bank details."
+    },
+    {
+      "id": "onboard-with-everything-given-is-a-card",
+      "ask": "Onboard Ethan Parker ethanparker@hamon.in, employee code H901, Software Engineer, joining 2026-12-01, phone 9876543210",
+      "expect": {
+        "outcome": "answered",
+        "action": {
+          "tool": "create_employee",
+          "state": "proposed",
+          "arguments": { "name": "Ethan Parker", "company_email": "ethanparker@hamon.in", "employee_code": "H901", "designation": "Software Engineer", "date_of_joining": "2026-12-01", "phone_number": "9876543210" }
+        },
+        "not_mention": ["PAN number", "PAN card", "Aadhaar", "bank account", "shall I go ahead"]
+      },
+      "reference": "Straight to the create_employee card for Confirm, carrying exactly what HR said: no question back, and no 'shall I go ahead?' of its own."
+    },
+    {
+      "id": "onboard-over-two-messages",
+      "ask": [
+        "Onboard Ethan Parker ethanparker@hamon.in",
+        "Code H901, Software Engineer, joining 2026-12-01, phone 9876543210"
+      ],
+      "expect": {
+        "outcome": "answered",
+        "action": {
+          "tool": "create_employee",
+          "state": "proposed",
+          "arguments": { "name": "Ethan Parker", "company_email": "ethanparker@hamon.in", "employee_code": "H901", "designation": "Software Engineer", "date_of_joining": "2026-12-01", "phone_number": "9876543210" }
+        }
+      },
+      "reference": "The second message completes the record: the card carries the name and email from the first and the rest from the second, with nothing asked again."
+    },
+    {
+      "id": "onboard-leaves-out-the-pan-hr-offers",
+      "ask": "Onboard Ethan Parker ethanparker@hamon.in, employee code H901, Software Engineer, joining 2026-12-01, phone 9876543210, PAN ABCDE1234F",
+      "expect": {
+        "outcome": "answered",
+        "action": { "tool": "create_employee", "state": "proposed", "arguments": { "employee_code": "H901" } },
+        "not_mention": ["ABCDE1234F"]
+      },
+      "reference": "The card carries no PAN (the tool takes none); the answer says the employee adds it on their own profile, without repeating the number."
+    },
+    {
+      "id": "onboard-refuses-an-email-outside-the-company",
+      "ask": "Onboard Ethan Parker ethan.parker@gmail.com",
+      "expect": { "outcome": "asked", "no_action": true, "mention": ["hamon.in"] },
+      "reference": "A question back, asking for the company email at hamon.in. Does not take the Gmail address as the company email."
+    },
+    {
+      "id": "orientation-lists-what-is-waiting",
+      "ask": "Which orientation requests are waiting?",
+      "expect": { "outcome": "answered", "no_action": true },
+      "reference": "Each new employee waiting, with the times they are free (date and time), or that none is waiting. Reads only; cites the result."
+    },
+    {
+      "id": "orientation-confirm-asks-for-the-place",
+      "ask": "Confirm Ethan Parker's orientation for 2026-12-02 at 11:00",
+      "expect": { "outcome": "asked", "no_action": true, "mention": ["where"] },
+      "reference": "Asks, in one short question, where it is (a room or a meeting link). Never guesses a place, and proposes nothing yet."
+    },
+    {
+      "id": "orientation-confirm-with-everything-is-a-card",
+      "ask": "Confirm Ethan Parker's orientation for 2026-12-02 at 11:00 in Room 2",
+      "expect": {
+        "outcome": "answered",
+        "action": { "tool": "confirm_orientation", "state": "proposed", "arguments": { "employee": "Ethan", "date": "2026-12-02", "time": "11:00", "place": "Room 2" } },
+        "not_mention": ["shall I go ahead"]
+      },
+      "reference": "Straight to the confirm_orientation card for Confirm, carrying exactly what HR said: no question back, and no 'shall I go ahead?' of its own."
+    },
+    {
+      "id": "onboarding-lists-who-is-onboarding",
+      "ask": "Who's still onboarding?",
+      "expect": { "outcome": "answered", "no_action": true, "not_mention": ["setup_email", "jira_access", "slack_joined"] },
+      "reference": "One short line per person being onboarded: name, progress and the step they are on, with what needs HR after it when there is something; or that nobody is. Never an internal step key or an id. Cites the result."
+    },
+    {
+      "id": "onboarding-status-of-one-person",
+      "ask": "What's Ethan Parker's onboarding status?",
+      "expect": { "outcome": "answered", "no_action": true, "mention": ["Ethan"], "not_mention": ["setup_email", "jira_access", "slack_joined", "first_login"] },
+      "reference": "A first line with the name, the progress and when it started; then the steps in order, each with its status in plain words and any note or error; the orientation and latest reminders only if there are any. Steps by their names, never their keys."
+    },
+    {
+      "id": "onboarding-retry-is-a-card",
+      "ask": "Retry Ethan Parker's setup email",
+      "expect": {
+        "outcome": "answered",
+        "action": { "tool": "retry_onboarding_step", "state": "proposed", "arguments": { "employee": "Ethan", "step": "setup" } },
+        "not_mention": ["shall I go ahead"]
+      },
+      "reference": "Straight to the retry card for Confirm, with HR's words for the person and the step passed as said; no question back and no 'shall I go ahead?'."
+    },
+    {
+      "id": "onboarding-excuse-is-a-card",
+      "ask": "Ethan Parker is on an internal project, so mark Jira not required for him",
+      "expect": {
+        "outcome": "answered",
+        "action": { "tool": "mark_onboarding_step_not_required", "state": "proposed", "arguments": { "employee": "Ethan", "step": "Jira", "reason": "internal" } },
+        "not_mention": ["shall I go ahead"]
+      },
+      "reference": "The not-required card for Confirm, carrying HR's reason as given; the bot does not ask for one."
+    },
+    {
+      "id": "onboarding-a-step-cannot-be-ticked-off",
+      "ask": "Mark Ethan Parker's profile as confirmed",
+      "expect": { "outcome": "answered", "no_action": true },
+      "reference": "Says a step is completed only when it is verified, so it cannot be marked done from chat, and offers what can be done (for example that the employee confirms their profile, or that HR can mark the step not required). Proposes no card."
     }
   ]
 }

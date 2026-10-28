@@ -174,10 +174,16 @@ READS = {
     "get_leave_request_impact", "get_leave_trend", "get_leave_calendar",
     "get_my_mbo_context", "get_my_mbo_plan",
     "start_wfh_request", "preview_wfh", "start_comp_off_request", "preview_comp_off",
+    "get_new_employee_options", "check_new_employee", "where_to_upload_documents",
+    "get_my_onboarding", "list_orientation_requests",
+    "list_onboardings", "get_onboarding_status",
 }
 WRITES = {
     "apply_leave", "cancel_my_leave", "approve_leave", "reject_leave", "save_my_mbo_plan",
-    "apply_wfh", "apply_comp_off",
+    "apply_wfh", "apply_comp_off", "create_employee", "confirm_my_profile",
+    "confirm_orientation",
+    "retry_onboarding_step", "mark_onboarding_step_not_required", "require_onboarding_step",
+    "start_onboarding",
 }
 
 

@@ -1,0 +1,180 @@
+"""HR's orientation tools against a fake HRMS: what is waiting is laid out with
+each time as a date and a time; confirming sends only what HR said, never guesses
+a place, and an employee is told only HR can; and the employee's own view says
+where their orientation stands."""
+
+from __future__ import annotations
+
+import json
+
+from starlette.testclient import TestClient
+
+from hrms_mcp import my_onboarding, orientation
+from hrms_mcp.onboarding import NOT_HR_ADMIN
+from tests.test_my_onboarding import MINE
+from tests.test_server import (  # noqa: F401, F811 - pytest fixtures
+    FakeHrms,
+    call,
+    client,
+    hrms,
+    rpc,
+    text,
+)
+
+WAITING = {"requests": [{
+    "employee": "Ethan Parker", "employee_code": "H101",
+    "options": [
+        {"label": "Tue 3 Nov, 11:00 (IST)", "date": "2026-11-03", "time": "11:00"},
+        {"label": "Wed 4 Nov, 15:00 (IST)", "date": "2026-11-04", "time": "15:00"},
+    ],
+}]}
+
+CONFIRMED = {
+    "employee": "Ethan Parker", "when": "Tue 3 Nov, 11:00 (IST)", "place": "Room 2",
+    "employee_told": "sent",
+}
+ARGS = {"employee": "Ethan", "date": "2026-11-03", "time": "11:00", "place": "Room 2"}
+
+
+def _sent(fake: FakeHrms, tool: str) -> list[dict]:
+    return [c["arguments"] for c in fake.calls() if c["name"] == tool]
+
+
+def test_waiting_requests_show_each_time_as_a_date_and_a_time(
+    client: TestClient, hrms: FakeHrms  # noqa: F811
+) -> None:
+    hrms.results["list_orientation_requests"] = WAITING
+    said = text(call(client, "list_orientation_requests"))
+    assert "Ethan Parker (H101) is free at:" in said
+    assert "1. Tue 3 Nov, 11:00 (IST) — date 2026-11-03, time 11:00" in said
+    assert "2. Wed 4 Nov, 15:00 (IST) — date 2026-11-04, time 15:00" in said
+    assert "Confirm Ethan's orientation for Tuesday 11am in Room 2." in said
+
+
+def test_nothing_waiting_is_an_answer(client: TestClient, hrms: FakeHrms) -> None:  # noqa: F811
+    hrms.results["list_orientation_requests"] = {"requests": []}
+    result = call(client, "list_orientation_requests")
+    assert not result.get("isError")
+    assert text(result) == orientation.NO_REQUESTS
+
+
+def test_an_employee_is_told_only_hr_can_as_an_answer(client: TestClient, hrms: FakeHrms) -> None:  # noqa: F811
+    hrms.errors["list_orientation_requests"] = "access denied: admin only"
+    result = call(client, "list_orientation_requests")
+    assert not result.get("isError")
+    assert text(result) == NOT_HR_ADMIN
+
+
+def test_confirming_sends_only_what_hr_said(client: TestClient, hrms: FakeHrms) -> None:  # noqa: F811
+    hrms.results["confirm_orientation"] = CONFIRMED
+    padded = {**ARGS, "employee": "  Ethan  ", "place": " Room 2 "}
+    result = call(client, "confirm_orientation", padded)
+    assert not result.get("isError"), text(result)
+    # The data, as the HRMS gave it — the assistant words it, from the guide.
+    assert json.loads(text(result)) == CONFIRMED
+    [sent] = _sent(hrms, "confirm_orientation")
+    assert sent == ARGS | {"employee": "Ethan"}
+    assert not {"employee_id", "caller_id"} & set(sent)
+
+
+def test_a_place_is_never_guessed(client: TestClient, hrms: FakeHrms) -> None:  # noqa: F811
+    for place in ("", "   "):
+        result = call(client, "confirm_orientation", {**ARGS, "place": place})
+        assert result["isError"]
+        assert "Ask HR for a room or a meeting link" in text(result)
+    assert _sent(hrms, "confirm_orientation") == []
+
+
+def test_confirming_as_an_employee_is_refused(client: TestClient, hrms: FakeHrms) -> None:  # noqa: F811
+    hrms.errors["confirm_orientation"] = "access denied: admin only"
+    result = call(client, "confirm_orientation", ARGS)
+    assert result["isError"]
+    assert NOT_HR_ADMIN in text(result)
+
+
+def test_the_hrms_refusals_reach_hr_as_they_were_said(
+    client: TestClient, hrms: FakeHrms  # noqa: F811
+) -> None:
+    hrms.errors["confirm_orientation"] = (
+        "that could be any of Ethan Parker (H101), Ethan Quinn (H102) — which one?"
+    )
+    result = call(client, "confirm_orientation", ARGS)
+    assert result["isError"]
+    assert "which one?" in text(result)
+
+
+def test_the_tools_carry_no_person_and_the_guide_is_in_the_description(client: TestClient) -> None:  # noqa: F811
+    tools = {t["name"]: t for t in rpc(client, "tools/list").json()["result"]["tools"]}
+    assert tools["list_orientation_requests"]["annotations"]["readOnlyHint"] is True
+    assert tools["confirm_orientation"]["annotations"]["readOnlyHint"] is False
+    required = set(tools["confirm_orientation"]["inputSchema"]["required"])
+    assert required == {"employee", "date", "time", "place"}
+    for name in ("list_orientation_requests", "confirm_orientation"):
+        properties = set(tools[name]["inputSchema"].get("properties", {}))
+        assert not {"employee_id", "caller_id"} & properties, name
+    said = " ".join(tools["confirm_orientation"]["description"].split())
+    for rule in (
+        "from employee_told",
+        'Never say they were told unless it says "sent"',
+        "Call list_orientation_requests first",
+        "tell them, citing it, and stop",
+        "Never guess a place",
+        "call get_leave_context and take the date from it",
+        'never ask "shall I go ahead?" yourself',
+        "Safe to repeat",
+    ):
+        assert rule in said, rule
+
+
+# --- the employee's own view -----------------------------------------------------
+
+
+def _with(orient: dict | None, orientation_status: str = "pending", own_done: bool = True) -> dict:
+    steps = []
+    for step in MINE["steps"]:
+        if step["key"] in ("first_login", "documents_uploaded", "profile_confirmed"):
+            step = {**step, "status": "completed" if own_done else step["status"]}
+        if step["key"] == "orientation_scheduled":
+            step = {**step, "status": orientation_status}
+        steps.append(step)
+    return {
+        **MINE, "steps": steps, "profile_gaps": [], "missing_documents": [], "orientation": orient,
+    }
+
+
+def test_once_their_steps_are_done_they_are_pointed_at_the_pickers() -> None:
+    said = my_onboarding.onboarding_lines(_with(None), "https://hr.example.com")
+    assert "Choose two or more times for your HR orientation with the date and time pickers" in said
+    assert "https://hr.example.com/employees/emp-0042" in said
+    assert "Still to do, by you: Joined Slack, HR orientation scheduled." in said
+
+
+def test_before_that_orientation_is_not_yet_asked_of_them() -> None:
+    said = my_onboarding.onboarding_lines(_with(None, own_done=False), "")
+    assert "Choose two or more times" not in said
+
+
+def test_after_proposing_it_is_hrs_move() -> None:
+    labels = ["Tue 3 Nov, 11:00 (IST)", "Wed 4 Nov, 15:00 (IST)"]
+    orient = {"status": "requested", "slot_labels": labels}
+    said = my_onboarding.onboarding_lines(_with(orient, "in_progress"), "")
+    assert f"You've proposed times for your HR orientation ({'; '.join(labels)})" in said
+    assert "by HR: " in said and "HR orientation scheduled" in said.split("by HR:")[1]
+    assert "Choose two or more times" not in said
+
+
+def test_once_confirmed_they_are_told_when_and_where() -> None:
+    orient = {"status": "confirmed", "confirmed_label": "Tue 3 Nov, 11:00 (IST)", "place": "Room 2"}
+    said = my_onboarding.onboarding_lines(_with(orient, "completed"), "")
+    assert "Your HR orientation: Tue 3 Nov, 11:00 (IST) — Room 2." in said
+    assert "Choose two or more times" not in said
+
+
+def test_hr_is_told_whether_the_employee_was_reached(client: TestClient, hrms: FakeHrms) -> None:  # noqa: F811
+    """The tool never states that the employee was told; it hands over whether."""
+    for state in ("sent", "failed", "skipped", "not_sent"):
+        hrms.results["confirm_orientation"] = {**CONFIRMED, "employee_told": state}
+        result = call(client, "confirm_orientation", ARGS)
+        assert json.loads(text(result))["employee_told"] == state
+        assert "sent the date" not in text(result)
+
