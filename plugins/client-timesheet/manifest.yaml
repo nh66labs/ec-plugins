@@ -13,12 +13,13 @@
 #   0.2.0    the Client timesheet agent and create_timesheet: the hours
 #   0.3.0    the ticket lists' settings: No Epics, No Estimates, Abandoned
 #   0.4.0    the HRMS server's leave calendar: leave codes and public holidays
+#   0.5.0    always mention: who is mentioned on every post in the client's Slack
 #   step 7   the three monthly schedules, set by the HR admin on the agent's
 #            Schedule tab (a manifest carries no schedule)
 manifest_version: 2
 plugin_id: client-timesheet
 name: Client timesheet
-version: 0.4.0
+version: 0.5.0
 description: Keeps the monthly timesheet a client asks for, for the company's employees placed there - who is who at the client, each person's hours from the client's Jira, and the tickets missing an epic, an estimate or a reason.
 
 connectors:
@@ -39,7 +40,7 @@ mcp_servers:
       - get_leave_calendar
 
 # The roster of placed employees, uploaded by a Space Admin; the monthly build
-# and, later, the nudges. A capability the platform's build carries (EC-D321).
+# and its post in the client's Slack. A capability the platform's build carries (EC-D321).
 client_timesheet: true
 
 agents:
@@ -63,6 +64,7 @@ agents:
         epic not needed for summaries = [PROD], [UAT]    (listed, with that reason)
         abandoned            = Abandoned  (the statuses that mean a ticket was dropped)
         leave codes          = Casual leave V, Sick leave S, Floating leave V   (each HRMS leave type's code)
+        always mention       = manjusha.m-issac@kulu.com, vandana.girishkumar@kulu.com   (mentioned on every post in the client's Slack)
 
       **The platform builds the timesheet.** It reads the roster and the
       client's Jira and writes every value. Call create_timesheet once, with no
