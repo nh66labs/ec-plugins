@@ -1,0 +1,302 @@
+"""The leave tools that change something in the HRMS, as the person asking.
+
+Every tool here is annotated as a write, so a platform that confirms writes —
+Enterprise Claw does, always — shows the person exactly what will be sent and
+runs it only once they accept. What a tool here receives is therefore what the
+person saw and agreed to.
+
+Each one is **safe to repeat**. A confirmed action can be delivered twice (a
+retry after a lost answer), and the HRMS files a new request every time
+``apply_leave`` is called. So before acting each tool looks at the HRMS's own
+view of the request and, when the thing it would do is already done, reports
+that rather than doing it again. Approving or rejecting something already
+decided is reported the same way the HRMS reports it: as done.
+
+A leave goes to **every** project manager of the person's, and is approved only
+once all of them approve; one rejection rejects it. So an approval may be one of
+several, and is said as recorded, with who is still to decide.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import ToolAnnotations
+
+from hrms_mcp import workload
+from hrms_mcp.hrms import Hrms, HrmsError
+from hrms_mcp.tools import (
+    DayPortion,
+    LeaveType,
+    _ask,
+    _identity,
+    approvers_sentence,
+    kind_of,
+    portion_of,
+    same_kind,
+    votes_of,
+    when_of,
+)
+
+FILES = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False)
+UNDOES = ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=False)
+
+
+async def _mine(hrms: Hrms, ctx: Context) -> list[dict[str, Any]]:
+    return list(await _ask(hrms, ctx, "get_leaves", {}) or [])
+
+
+async def _checked(
+    hrms: Hrms, ctx: Context, leave_id: str, employee: str
+) -> tuple[dict[str, Any], str]:
+    """The request, and whose it is — refused unless ``employee`` names that person.
+
+    The card a person confirms shows the employee's name beside the request's
+    reference; checking the two agree here means a card can never read as one
+    person's leave while acting on another's.
+    """
+    item = await _to_decide(hrms, ctx, leave_id)
+    who = await _whose(hrms, ctx, leave_id)
+    if not who:
+        raise ToolError(
+            "The HRMS did not say whose request that is, so it cannot be decided here. "
+            "Decide it in the HRMS instead."
+        )
+    if _name(employee) != _name(who):
+        raise ToolError(
+            f"That request is {who}'s, not {employee}'s. Look it up again with "
+            "list_leave_requests_to_decide."
+        )
+    return item, who
+
+
+def _name(name: str) -> str:
+    """A name as compared: whitespace collapsed, case ignored."""
+    return " ".join(name.split()).casefold()
+
+
+async def _whose(hrms: Hrms, ctx: Context, leave_id: str) -> str:
+    """The name of the employee whose request it is, or "" when the HRMS gives none."""
+    try:
+        routed = await hrms.call("get_leave_routing", {"leave_id": leave_id}, _identity(ctx))
+    except HrmsError as error:
+        raise ToolError(str(error)) from None
+    if not isinstance(routed, dict):
+        return ""
+    return " ".join(str(routed.get("employee") or "").split())
+
+
+def _decided(item: dict[str, Any], who: str) -> str:
+    """"Navaneeth K's casual leave for Thu 1 Oct 2026, full day"."""
+    when = when_of(str(item.get("date_from", "")), str(item.get("date_to", "")))
+    return (
+        f"{who}'s {kind_of(item.get('type', '')).lower()} for {when}, "
+        f"{portion_of(item.get('mode', ''))}"
+    )
+
+
+async def _waiting_for(hrms: Hrms, ctx: Context) -> str:
+    """Who a request just filed waits for, said to the person who filed it — or
+    nothing when the HRMS cannot say: the request is filed either way, so this
+    read never fails the filing."""
+    try:
+        result = await _ask(hrms, ctx, "get_employee_project_managers", {})
+    except ToolError:
+        return ""
+    managers = result.get("project_managers") if isinstance(result, dict) else None
+    if not isinstance(managers, list):
+        return ""
+    managers = [m for m in managers if isinstance(m, dict)]
+    return " " + approvers_sentence(managers, filed=True)
+
+
+def _own_vote(item: dict[str, Any], what: str) -> str:
+    """What to say when the asker's own vote on a request is no longer open —
+    a vote is final, and one withdrawn means they are no longer an approver —
+    or "" while it is open (or they hold none)."""
+    mine = item.get("my_decision")
+    if mine == "Approved":
+        return (
+            f"You already approved {what}{_still(votes_of(item, 'Pending'))}. "
+            "A vote cannot be changed. Nothing changed."
+        )
+    if mine == "Rejected":
+        return f"You already rejected {what}. Nothing changed."
+    if mine == "Withdrawn":
+        return f"You are no longer an approver of {what}. Nothing changed."
+    return ""
+
+
+async def _already_decided(
+    hrms: Hrms, ctx: Context, request_id: str, item: dict[str, Any], who: str
+) -> str:
+    """The answer when the HRMS reports a decision already made — the request, or
+    the asker's own vote. Said from the request as it stands now, read again,
+    since it may have moved since it was listed."""
+    try:
+        item = await _to_decide(hrms, ctx, request_id)
+    except ToolError:
+        pass
+    what = _decided(item, who)
+    status = str(item.get("status") or "")
+    if status in ("Approved", "Rejected", "Cancelled"):
+        return f"Already {status.lower()}: {what}. Nothing changed."
+    already = f"{what[:1].upper()}{what[1:]} was already decided. Nothing changed."
+    return _own_vote(item, what) or already
+
+
+def _still(names: list[str]) -> str:
+    """"; still waiting for B and C" — or nothing, when the HRMS named no one."""
+    return f"; still waiting for {workload.joined(names)}" if names else ""
+
+
+async def _to_decide(hrms: Hrms, ctx: Context, leave_id: str) -> dict[str, Any]:
+    """The request, if it is one the asker may decide — found in their own list,
+    which the HRMS scopes to their team, or to everyone for HR."""
+    for status in ("Pending", "Approved", "Rejected"):
+        try:
+            leaves = await hrms.call("get_team_leaves", {"status": status}, _identity(ctx))
+        except HrmsError as error:
+            raise ToolError(str(error)) from None
+        for item in leaves or []:
+            if str(item.get("leave_id")) == leave_id:
+                return item
+    raise ToolError(
+        "That is not a leave request waiting on the person asking. Look it up again "
+        "with list_leave_requests_to_decide."
+    )
+
+
+def register(server: MCPServer, hrms: Hrms) -> None:
+    @server.tool(annotations=FILES, structured_output=False)
+    async def apply_leave(
+        leave_type: LeaveType,
+        date_from: str,
+        day_portion: DayPortion,
+        reason: str,
+        ctx: Context,
+        date_to: str = "",
+        # Accepted and ignored, so a card saved before every project manager
+        # approved still validates: the HRMS sends the request to them all.
+        approver: str = "",
+    ) -> str:
+        """File a leave request for the person asking. They confirm it first.
+
+        Call preview_leave with the same details before this. Every argument
+        comes from what the person said or from get_leave_context — never guess
+        a leave type, a day portion or a reason. Dates are YYYY-MM-DD; date_to
+        defaults to date_from. It goes to every one of their project managers.
+        """
+        if not reason.strip():
+            raise ToolError("A reason is needed. Ask the person why they need the leave.")
+        date_to = date_to or date_from
+        for item in await _mine(hrms, ctx):
+            if (
+                str(item.get("status")) in ("Pending", "Approved")
+                and str(item.get("leave_date_from", ""))[:10] == date_from
+                and str(item.get("leave_date_to", ""))[:10] == date_to
+                and same_kind(item.get("leave_type", ""), leave_type)
+                and portion_of(item.get("leave_mode", "")) == portion_of(day_portion)
+            ):
+                return (
+                    f"Already filed: {kind_of(leave_type)}, {when_of(date_from, date_to)}, "
+                    f"{portion_of(day_portion)} — {item.get('status')}. Nothing new was filed."
+                )
+
+        arguments: dict[str, Any] = {
+            "leave_type": leave_type,
+            "leave_mode": day_portion,
+            "date_from": date_from,
+            "date_to": date_to,
+            "reason": reason.strip(),
+        }
+        # No approver is sent: the HRMS sends it to every project manager of
+        # theirs, fixed when it is filed.
+        filed = await _ask(hrms, ctx, "apply_leave", arguments)
+        status = filed.get("status", "Pending") if isinstance(filed, dict) else "Pending"
+        waiting = await _waiting_for(hrms, ctx) if status == "Pending" else ""
+        return (
+            f"Filed: {kind_of(leave_type)}, {when_of(date_from, date_to)}, "
+            f"{portion_of(day_portion)} — reason: {reason.strip()}. Status: {status}.{waiting}"
+        )
+
+    @server.tool(annotations=UNDOES, structured_output=False)
+    async def cancel_my_leave(request_id: str, ctx: Context) -> str:
+        """Withdraw one of the person's own leave requests, pending or approved.
+        request_id comes from list_my_leaves."""
+        mine = {str(item.get("id")): item for item in await _mine(hrms, ctx)}
+        item = mine.get(request_id)
+        if item is None:
+            raise ToolError("That is not one of the person's leave requests.")
+        what = (
+            f"{kind_of(item.get('leave_type', ''))}, "
+            f"{when_of(str(item.get('leave_date_from', '')), str(item.get('leave_date_to', '')))}"
+        )
+        if item.get("status") == "Cancelled":
+            return f"Already cancelled: {what}. Nothing changed."
+        await _ask(hrms, ctx, "cancel_leave", {"leave_id": request_id})
+        return f"Cancelled: {what}."
+
+    @server.tool(annotations=FILES, structured_output=False)
+    async def approve_leave(
+        request_id: str, employee: str, ctx: Context, note: str = ""
+    ) -> str:
+        """Approve a leave request waiting on the person asking. request_id and
+        employee (the name of the person whose leave it is) both come from
+        list_leave_requests_to_decide. note is optional, for the employee.
+        When other project managers must still approve it, the answer says who:
+        tell the person that, never that the leave is approved."""
+        item, who = await _checked(hrms, ctx, request_id, employee)
+        what = _decided(item, who)
+        if item.get("status") in ("Approved", "Rejected"):
+            return f"Already {str(item['status']).lower()}: {what}. Nothing changed."
+        # Their own vote, on a request still waiting for the others.
+        if settled := _own_vote(item, what):
+            return settled
+        arguments: dict[str, Any] = {"leave_id": request_id}
+        if note.strip():
+            arguments["notes"] = note.strip()
+        answer = await _ask(hrms, ctx, "approve_leave", arguments)
+        done = answer if isinstance(answer, dict) else {}
+        if done.get("final") is False:
+            waiting = [str(n).strip() for n in done.get("waiting_for") or [] if str(n).strip()]
+            return (
+                f"Your approval of {what} is recorded. It is approved once every project "
+                f"manager approves{_still(waiting)}."
+            )
+        if done.get("action_taken") == "already_decided":
+            # Decided before this call reached the HRMS — a retry, or another
+            # approver — so it is done, not failed.
+            return await _already_decided(hrms, ctx, request_id, item, who)
+        return f"Approved {what}. The HRMS tells {who}."
+
+    @server.tool(annotations=UNDOES, structured_output=False)
+    async def reject_leave(request_id: str, employee: str, reason: str, ctx: Context) -> str:
+        """Reject a leave request waiting on the person asking, with the reason the
+        employee will be told. request_id and employee (the name of the person
+        whose leave it is) both come from list_leave_requests_to_decide.
+
+        reason is required. If the person already said why ("because of the
+        pending deployment"), use their words and do not ask again; only when
+        they gave none, ask for it.
+        """
+        said = reason.strip().rstrip(".")
+        if not said:
+            raise ToolError("A reason is needed to reject. Ask the person why.")
+        item, who = await _checked(hrms, ctx, request_id, employee)
+        if item.get("status") == "Rejected":
+            return f"Already rejected: {_decided(item, who)}. Nothing changed."
+        # A vote of theirs already cast — an approval included — is final.
+        if settled := _own_vote(item, _decided(item, who)):
+            return settled
+        answer = await _ask(hrms, ctx, "reject_leave", {"leave_id": request_id, "reason": said})
+        if isinstance(answer, dict) and answer.get("action_taken") == "already_decided":
+            return await _already_decided(hrms, ctx, request_id, item, who)
+        # One rejection rejects it for everyone it went to, so they hear of it too.
+        others = " and the other approvers" if len(item.get("approvals") or []) > 1 else ""
+        return (
+            f"Rejected {_decided(item, who)}. Reason given: {said}. "
+            f"The HRMS tells {who}{others}."
+        )

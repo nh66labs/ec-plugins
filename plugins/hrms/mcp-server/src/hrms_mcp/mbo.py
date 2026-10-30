@@ -40,6 +40,11 @@ REPLACES = ToolAnnotations(
     readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False
 )
 
+#: Removes one MBO from the plan — a write that cannot be undone.
+REMOVES = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False
+)
+
 #: How many MBOs one save carries. The HRMS allows more; a quarter's plan that
 #: needs more than five is one to set in the HRMS itself.
 MAX_MBOS = 5
@@ -604,3 +609,49 @@ def register(server: MCPServer, hrms: Hrms, guides: Guides = DEFAULT_GUIDES) -> 
             + plan_lines(plan, "Plan")
             + ["Submit it in the HRMS when you are ready."]
         )
+
+    @server.tool(annotations=REMOVES, structured_output=False)
+    async def delete_my_mbo(
+        fiscal_year: str, quarter: int, mbo_number: int, objective: str, ctx: Context
+    ) -> str:
+        """Deletes one MBO from the person's Draft plan for the quarter.
+
+        Call it only when the person clearly asks to delete a goal, never to
+        rework a set (that is save_my_mbo_plan). mbo_number is the MBO's place
+        in the plan, counting from 1, and objective is its title, both as
+        get_my_mbo_plan lists it; read the plan first. The other MBOs are left
+        as they are and their weightages are not rebalanced, so tell the person
+        the plan may no longer total 100. It does not submit the plan.
+        """
+        if not 1 <= quarter <= 4:
+            raise ToolError("quarter must be 1-4")
+        if mbo_number < 1:
+            raise ToolError("mbo_number counts from 1")
+        wanted = objective.strip()
+        if not wanted:
+            raise ToolError("Say which MBO to delete: its objective is needed.")
+        period = {"fiscal_year": fiscal_year.strip(), "quarter": quarter}
+        # Read first so a goal that is already gone is said so, not an error.
+        # The HRMS checks the same again; this is what keeps a repeated call
+        # from naming whatever sits at that number now.
+        plan = await _ask(hrms, ctx, "get_my_mbo_plan", period)
+        rows = (plan.get("mbos") or []) if isinstance(plan, dict) else []
+        titles = [str(row.get("title", "")).strip().casefold() for row in rows]
+        if wanted.casefold() not in titles:
+            return f"Already gone, or not on this plan: {wanted}. Nothing changed."
+        if mbo_number > len(rows) or titles[mbo_number - 1] != wanted.casefold():
+            raise ToolError(
+                f"That is not MBO {mbo_number} on the plan now. Read the plan again "
+                "with get_my_mbo_plan."
+            )
+        left = await _ask(
+            hrms, ctx, "delete_my_mbo",
+            {**period, "mbo_number": mbo_number, "title": wanted},
+        )
+        lines = [f"Deleted MBO {mbo_number}: {wanted}."] + plan_lines(left, "Plan")
+        total = sum(float(m.get("weightage") or 0) for m in (left or {}).get("mbos") or [])
+        if left and left.get("mbos") and abs(total - 100) > 0.01:
+            lines.append(
+                f"The weightages now total {total:g}, not 100: adjust them before submitting."
+            )
+        return "\n".join(lines)
