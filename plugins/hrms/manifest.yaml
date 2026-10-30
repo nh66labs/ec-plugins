@@ -6,7 +6,7 @@
 manifest_version: 2
 plugin_id: hrms
 name: HRMS
-version: 0.24.0
+version: 0.25.0
 description: Takes and decides leave requests, takes work-from-home and comp-off requests, answers leave and holiday questions, gives an HRMS administrator an employee's leave trend, onboards a new employee for HR, and helps people set their quarterly MBOs, in the company's HRMS — as the person asking.
 
 # What a person says about themselves while setting MBOs — their interests, what
@@ -52,6 +52,7 @@ mcp_servers:
       - approve_leave
       - reject_leave
       - save_my_mbo_plan
+      - delete_my_mbo
       - create_employee
       - confirm_my_profile
       - start_profile_update

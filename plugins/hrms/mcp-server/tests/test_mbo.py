@@ -328,6 +328,76 @@ def test_the_hrms_refusing_a_save_is_said_plainly(client, mbo_hrms) -> None:  # 
     assert result["isError"] and "only a Draft plan can be changed" in text(result)
 
 
+# --- the delete -----------------------------------------------------------------------
+
+AFTER_DELETE = {
+    **PLAN,
+    "total_weightage": 60,
+    "mbos": [PLAN["mbos"][0]],
+}
+GONE = {"fiscal_year": "2026-27", "quarter": 3, "objective": "Cut P1 bugs"}
+
+
+def test_the_delete_is_listed_as_a_write_that_names_the_goal(client) -> None:  # noqa: F811
+    tools = {t["name"]: t for t in rpc(client, "tools/list").json()["result"]["tools"]}
+    delete = tools["delete_my_mbo"]
+    assert delete["annotations"]["readOnlyHint"] is False
+    assert delete["annotations"]["destructiveHint"] is True
+    # The card shows the objective, so what is confirmed reads as the goal deleted.
+    assert set(delete["inputSchema"]["required"]) == {
+        "fiscal_year", "quarter", "mbo_number", "objective",
+    }
+
+
+def test_a_delete_removes_the_named_goal_and_says_what_is_left(client, mbo_hrms) -> None:  # noqa: F811
+    answers = iter([PLAN, AFTER_DELETE])
+    mbo_hrms.results["get_my_mbo_plan"] = lambda _arguments: next(answers)
+    mbo_hrms.results["delete_my_mbo"] = AFTER_DELETE
+    said = text(call(client, "delete_my_mbo", {**GONE, "mbo_number": 2}))
+    assert "Deleted MBO 2: Cut P1 bugs." in said
+    assert "1. Ship v2" in said and "Cut P1 bugs —" not in said
+    assert "now total 60, not 100" in said
+    sent = mbo_hrms.calls()[-1]
+    assert sent["name"] == "delete_my_mbo"
+    assert sent["arguments"] == {
+        "fiscal_year": "2026-27", "quarter": 3, "mbo_number": 2, "title": "Cut P1 bugs",
+    }
+
+
+def test_a_repeated_delete_changes_nothing(client, mbo_hrms) -> None:  # noqa: F811
+    mbo_hrms.results["get_my_mbo_plan"] = AFTER_DELETE
+    said = text(call(client, "delete_my_mbo", {**GONE, "mbo_number": 2}))
+    assert "Nothing changed" in said
+    assert all(c["name"] != "delete_my_mbo" for c in mbo_hrms.calls())
+
+
+@pytest.mark.parametrize(
+    ("change", "says"),
+    [
+        ({"mbo_number": 1}, "not MBO 1 on the plan now"),
+        ({"mbo_number": 0}, "counts from 1"),
+        ({"objective": "  "}, "its objective is needed"),
+        ({"quarter": 5}, "quarter must be 1-4"),
+    ],
+)
+def test_a_delete_that_does_not_name_one_goal_is_refused_before_the_hrms(
+    client, mbo_hrms, change: dict, says: str,  # noqa: F811
+) -> None:
+    mbo_hrms.results["get_my_mbo_plan"] = PLAN
+    result = call(client, "delete_my_mbo", {**GONE, "mbo_number": 2, **change})
+    assert result["isError"] and says in text(result)
+    assert all(c["name"] != "delete_my_mbo" for c in mbo_hrms.calls())
+
+
+def test_the_hrms_refusing_a_delete_is_said_plainly(client, mbo_hrms) -> None:  # noqa: F811
+    mbo_hrms.results["get_my_mbo_plan"] = PLAN
+    mbo_hrms.errors["delete_my_mbo"] = (
+        "cannot delete: the Q3 2026-27 plan is Submitted; only a Draft plan can be changed"
+    )
+    result = call(client, "delete_my_mbo", {**GONE, "mbo_number": 2})
+    assert result["isError"] and "only a Draft plan can be changed" in text(result)
+
+
 def test_the_mbos_never_reach_the_log(client, mbo_hrms, caplog) -> None:  # noqa: F811
     caplog.set_level("DEBUG")
     call(client, "save_my_mbo_plan", AGREED)
