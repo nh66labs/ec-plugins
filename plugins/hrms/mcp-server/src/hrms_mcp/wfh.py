@@ -36,7 +36,7 @@ from hrms_mcp.tools import (
     warning_of,
     when_of,
 )
-from hrms_mcp.writes import FILES, _waiting_for
+from hrms_mcp.writes import FILES, UNDOES, _waiting_for
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False)
 
@@ -212,3 +212,36 @@ def register(server: MCPServer, hrms: Hrms) -> None:
             f"Filed: {what[:1].upper()}{what[1:]} — reason: {reason.strip()}. "
             f"Status: {status}.{waiting}"
         )
+
+    @server.tool(annotations=UNDOES, structured_output=False)
+    async def cancel_my_wfh(date_from: str, ctx: Context) -> str:
+        """Withdraw one of the person's own work-from-home requests, pending or
+        approved. date_from is the first day of the request (YYYY-MM-DD)."""
+        date_from, _ = dates_of(date_from, "")
+        held = [
+            item
+            for item in await _ask(hrms, ctx, "get_wfh_history", {}) or []
+            if isinstance(item, dict) and str(item.get("date_from", ""))[:10] == date_from
+        ]
+        open_ones = [i for i in held if str(i.get("status")) in ("Pending", "Approved")]
+        if not open_ones:
+            if held and all(str(i.get("status")) == "Cancelled" for i in held):
+                what = wfh_line(date_from, date_from)
+                return f"Already cancelled: {what[:1].lower()}{what[1:]}. Nothing changed."
+            raise ToolError(
+                f"The person has no work-from-home request starting {day_of(date_from)} "
+                "that can be cancelled."
+            )
+        if len(open_ones) > 1:
+            raise ToolError(
+                f"The person has more than one work-from-home request starting "
+                f"{day_of(date_from)}. Cancel it in the HRMS instead."
+            )
+        item = open_ones[0]
+        if not item.get("wfh_id"):
+            raise ToolError("The HRMS gave no reference for that request. Cancel it in the HRMS.")
+        what = wfh_line(
+            date_from, str(item.get("date_to", ""))[:10] or date_from, str(item.get("mode", ""))
+        )
+        await _ask(hrms, ctx, "cancel_wfh", {"wfh_id": str(item["wfh_id"])})
+        return f"Cancelled: {what}."

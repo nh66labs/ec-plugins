@@ -181,7 +181,8 @@ READS = {
 WRITES = {
     "apply_leave", "cancel_my_leave", "approve_leave", "reject_leave", "save_my_mbo_plan",
     "delete_my_mbo", "clear_my_mbo_plan",
-    "apply_wfh", "apply_comp_off", "create_employee", "confirm_my_profile",
+    "apply_wfh", "apply_comp_off", "cancel_my_wfh", "cancel_my_comp_off",
+    "create_employee", "confirm_my_profile",
     "confirm_orientation", "complete_orientation",
     "retry_onboarding_step", "mark_onboarding_step_not_required", "require_onboarding_step",
     "start_onboarding", "start_profile_update",
@@ -1878,3 +1879,97 @@ def test_a_comp_off_filed_with_no_status_is_said_as_pending(
         "work_date": "2026-10-02", "reason": "release support",
     }))
     assert "Status: Pending. It is waiting for Priya to approve." in said
+
+
+# --- cancelling work from home and comp-off ------------------------------------------------------
+
+
+def test_cancel_my_wfh_withdraws_the_request_on_that_day(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    hrms.results["get_wfh_history"] = [
+        {"wfh_id": "w-0", "date_from": "2026-10-19", "date_to": "2026-10-19",
+         "mode": "Full Day", "status": "Cancelled"},
+        {"wfh_id": "w-1", "date_from": "2026-10-26", "date_to": "2026-10-26",
+         "mode": "Full Day", "status": "Approved"},
+    ]
+    said = text(call(client, "cancel_my_wfh", {"date_from": "2026-10-26"}))
+    assert said == "Cancelled: Work from home on Mon 26 Oct 2026, full day."
+    assert _called(hrms, "cancel_wfh") == [{"wfh_id": "w-1"}]
+
+
+def test_cancel_my_wfh_twice_cancels_once(client: TestClient, hrms: FakeHrms) -> None:
+    hrms.results["get_wfh_history"] = [
+        {"wfh_id": "w-1", "date_from": "2026-10-26", "date_to": "2026-10-26",
+         "mode": "Full Day", "status": "Cancelled"},
+    ]
+    said = text(call(client, "cancel_my_wfh", {"date_from": "2026-10-26"}))
+    assert said.startswith("Already cancelled: work from home on Mon 26 Oct 2026")
+    assert _called(hrms, "cancel_wfh") == []
+
+
+def test_cancel_my_wfh_refuses_a_day_with_no_request(client: TestClient, hrms: FakeHrms) -> None:
+    hrms.results["get_wfh_history"] = [
+        {"wfh_id": "w-2", "date_from": "2026-10-27", "date_to": "2026-10-27",
+         "mode": "Full Day", "status": "Pending"},
+        {"wfh_id": "w-3", "date_from": "2026-10-26", "date_to": "2026-10-26",
+         "mode": "Full Day", "status": "Rejected"},
+    ]
+    refused = call(client, "cancel_my_wfh", {"date_from": "2026-10-26"})
+    assert refused["isError"] is True
+    assert _called(hrms, "cancel_wfh") == []
+
+
+def test_cancel_my_comp_off_withdraws_the_one_for_that_day(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    hrms.results["get_comp_off_history"] = [
+        {"id": 6, "work_date": "2026-10-10", "status": "Pending"},
+        {"id": 7, "work_date": "2026-10-02", "off_date": "2026-11-02", "status": "Pending"},
+    ]
+    said = text(call(client, "cancel_my_comp_off", {"work_date": "2026-10-02"}))
+    assert said == "Cancelled: Comp-off for working on Fri 2 Oct 2026, off on Mon 2 Nov 2026."
+    assert _called(hrms, "cancel_comp_off") == [{"comp_off_id": "7"}]
+
+
+def test_cancel_my_comp_off_twice_cancels_once(client: TestClient, hrms: FakeHrms) -> None:
+    hrms.results["get_comp_off_history"] = [
+        {"id": 7, "work_date": "2026-10-02", "status": "Cancelled"},
+    ]
+    said = text(call(client, "cancel_my_comp_off", {"work_date": "2026-10-02"}))
+    assert said.startswith("Already cancelled: comp-off for working on Fri 2 Oct 2026")
+    assert _called(hrms, "cancel_comp_off") == []
+
+
+def test_cancel_my_comp_off_never_sends_an_id_that_is_not_the_persons(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    hrms.results["get_comp_off_history"] = [
+        {"id": 7, "work_date": "2026-10-02", "status": "Rejected"},
+    ]
+    refused = call(client, "cancel_my_comp_off", {"work_date": "2026-10-09"})
+    assert refused["isError"] is True
+    assert _called(hrms, "cancel_comp_off") == []
+
+
+def test_cancel_my_comp_off_refuses_when_two_are_open_for_the_day(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    hrms.results["get_comp_off_history"] = [
+        {"id": 7, "work_date": "2026-10-02", "off_date": "2026-11-02", "status": "Pending"},
+        {"id": 8, "work_date": "2026-10-02", "status": "Approved"},
+    ]
+    refused = call(client, "cancel_my_comp_off", {"work_date": "2026-10-02"})
+    assert refused["isError"] is True
+    assert _called(hrms, "cancel_comp_off") == []
+
+
+def test_a_cancel_without_a_reference_sends_nothing(client: TestClient, hrms: FakeHrms) -> None:
+    hrms.results["get_wfh_history"] = [
+        {"date_from": "2026-10-26", "date_to": "2026-10-26", "mode": "Full Day",
+         "status": "Pending"},
+    ]
+    hrms.results["get_comp_off_history"] = [{"work_date": "2026-10-02", "status": "Pending"}]
+    assert call(client, "cancel_my_wfh", {"date_from": "2026-10-26"})["isError"] is True
+    assert call(client, "cancel_my_comp_off", {"work_date": "2026-10-02"})["isError"] is True
+    assert _called(hrms, "cancel_wfh") == [] and _called(hrms, "cancel_comp_off") == []

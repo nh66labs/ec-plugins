@@ -31,7 +31,7 @@ from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
 from hrms_mcp.hrms import Hrms
 from hrms_mcp.tools import _ask, _today, approvers_sentence, date_in, day_of, warning_of
-from hrms_mcp.writes import FILES, _waiting_for
+from hrms_mcp.writes import FILES, UNDOES, _waiting_for
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False)
 
@@ -360,3 +360,35 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         status = str((filed.get("status") if isinstance(filed, dict) else "") or "Pending")
         waiting = await _waiting_for(hrms, ctx) if status == "Pending" else ""
         return f"Filed: {what} — reason: {reason.strip()}. Status: {status}.{waiting}"
+
+    @server.tool(annotations=UNDOES, structured_output=False)
+    async def cancel_my_comp_off(work_date: str, ctx: Context) -> str:
+        """Withdraw one of the person's own comp-off requests, pending or
+        approved. work_date is the day worked (YYYY-MM-DD)."""
+        worked = _worked(work_date).isoformat()
+        # The HRMS does not check whose a comp-off is, so only the person's own
+        # history is looked through: an id not in it is never sent.
+        held = [
+            item
+            for item in await _ask(hrms, ctx, "get_comp_off_history", {}) or []
+            if isinstance(item, dict) and str(item.get("work_date", ""))[:10] == worked
+        ]
+        open_ones = [i for i in held if str(i.get("status")) in ("Pending", "Approved")]
+        if not open_ones:
+            if held and all(str(i.get("status")) == "Cancelled" for i in held):
+                what = comp_off_line(worked)
+                return f"Already cancelled: {what[:1].lower()}{what[1:]}. Nothing changed."
+            raise ToolError(
+                f"The person has no comp-off for {day_of(worked)} that can be cancelled."
+            )
+        if len(open_ones) > 1:
+            raise ToolError(
+                f"The person has more than one comp-off for {day_of(worked)}. "
+                "Cancel it in the HRMS instead."
+            )
+        item = open_ones[0]
+        if item.get("id") in (None, ""):
+            raise ToolError("The HRMS gave no reference for that request. Cancel it in the HRMS.")
+        what = comp_off_line(worked, str(item.get("off_date") or "")[:10])
+        await _ask(hrms, ctx, "cancel_comp_off", {"comp_off_id": str(item["id"])})
+        return f"Cancelled: {what}."
