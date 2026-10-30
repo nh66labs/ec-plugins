@@ -180,7 +180,7 @@ READS = {
 }
 WRITES = {
     "apply_leave", "cancel_my_leave", "approve_leave", "reject_leave", "save_my_mbo_plan",
-    "delete_my_mbo",
+    "delete_my_mbo", "clear_my_mbo_plan",
     "apply_wfh", "apply_comp_off", "create_employee", "confirm_my_profile",
     "confirm_orientation", "complete_orientation",
     "retry_onboarding_step", "mark_onboarding_step_not_required", "require_onboarding_step",

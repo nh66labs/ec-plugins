@@ -45,6 +45,12 @@ REMOVES = ToolAnnotations(
     readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False
 )
 
+#: Removes every MBO from the plan — a write that cannot be undone, and safe to
+#: repeat: an empty plan is left as it is.
+CLEARS = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False
+)
+
 #: How many MBOs one save carries. The HRMS allows more; a quarter's plan that
 #: needs more than five is one to set in the HRMS itself.
 MAX_MBOS = 5
@@ -655,3 +661,41 @@ def register(server: MCPServer, hrms: Hrms, guides: Guides = DEFAULT_GUIDES) -> 
                 f"The weightages now total {total:g}, not 100: adjust them before submitting."
             )
         return "\n".join(lines)
+
+    @server.tool(annotations=CLEARS, structured_output=False)
+    async def clear_my_mbo_plan(
+        fiscal_year: str, quarter: int, mbo_count: int, ctx: Context
+    ) -> str:
+        """Deletes every MBO from the person's Draft plan for the quarter.
+
+        Call it only when the person clearly asks to delete all their goals or
+        start the plan over; for one goal use delete_my_mbo. mbo_count is how
+        many MBOs the plan holds, as get_my_mbo_plan lists them: read the plan
+        first and say so in the answer. The plan itself is kept, empty. It does
+        not submit the plan.
+        """
+        if not 1 <= quarter <= 4:
+            raise ToolError("quarter must be 1-4")
+        if mbo_count < 1:
+            raise ToolError("mbo_count is how many MBOs the plan holds, at least 1.")
+        period = {"fiscal_year": fiscal_year.strip(), "quarter": quarter}
+        # Read first so an empty plan is said to be, not an error, and so a plan
+        # that changed since the person was shown it is never emptied.
+        plan = await _ask(hrms, ctx, "get_my_mbo_plan", period)
+        rows = (plan.get("mbos") or []) if isinstance(plan, dict) else []
+        if not rows:
+            return "The plan has no MBOs. Nothing changed."
+        if len(rows) != mbo_count:
+            raise ToolError(
+                f"The plan has {len(rows)} MBO(s) now, not {mbo_count}. Read it again "
+                "with get_my_mbo_plan."
+            )
+        left = await _ask(
+            hrms, ctx, "clear_my_mbo_plan", {**period, "mbo_count": mbo_count}
+        )
+        gone = "; ".join(str(row.get("title", "")).strip() for row in rows)
+        return "\n".join(
+            [f"Deleted all {len(rows)} MBO{'s' if len(rows) != 1 else ''}: {gone}."]
+            + plan_lines(left, "Plan")
+            + ["The plan is kept, empty, as a Draft."]
+        )
