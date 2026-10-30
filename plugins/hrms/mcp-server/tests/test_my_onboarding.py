@@ -32,7 +32,7 @@ MINE = {
         _step("slack_invite", "Slack invitation sent", "in_progress"),
         _step("slack_joined", "Joined Slack", "pending"),
         _step("first_login", "Signed in to HR-Assist", "completed"),
-        _step("jira_access", "Jira access", "not_required"),
+        _step("documents_extra", "Extra check", "not_required"),
         _step("documents_uploaded", "Documents uploaded", "in_progress"),
         _step("profile_confirmed", "Profile confirmed", "pending"),
         _step("orientation_scheduled", "HR orientation scheduled", "pending"),
@@ -49,7 +49,7 @@ def test_the_lines_say_what_is_done_whose_the_rest_is_and_what_is_missing() -> N
     assert "Still to do, by you: Joined Slack, Documents uploaded, Profile confirmed, " \
         "HR orientation scheduled." in said
     assert "Still to do, by HR: Slack invitation sent." in said
-    assert "Jira" not in said  # not required: neither done nor left
+    assert "Extra check" not in said  # not required: neither done nor left
     assert "fill in your date of birth, PAN" in said
     assert "https://hr.example.com/employees/emp-0042/edit" in said
     assert "Documents still needed: Aadhaar card" in said
@@ -73,7 +73,7 @@ def test_a_step_with_no_label_is_still_listed() -> None:
 def test_two_steps_with_one_label_are_each_listed_under_their_own() -> None:
     steps = [
         {"key": "first_login", "label": "Same", "status": "pending"},
-        {"key": "jira_access", "label": "Same", "status": "pending"},
+        {"key": "slack_invite", "label": "Same", "status": "pending"},
     ]
     said = my_onboarding.onboarding_lines({**MINE, "steps": steps}, "")
     assert "Still to do, by you: Same." in said

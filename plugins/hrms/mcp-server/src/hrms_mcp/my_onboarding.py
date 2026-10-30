@@ -33,7 +33,7 @@ def _label(step: dict[str, Any]) -> str:
 NO_ONBOARDING = "You have no onboarding in progress, so there is nothing left to do."
 
 #: The steps the employee does themselves; the rest are HR's, or are checked
-#: by HR-Assist (an invite sent, Jira access granted).
+#: by HR-Assist (an invite sent).
 THEIRS = {"first_login", "slack_joined", "documents_uploaded", "profile_confirmed"}
 
 #: The steps the employee does before they are asked for their orientation times.

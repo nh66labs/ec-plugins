@@ -5,8 +5,6 @@ changes; and the guide for each is in its description, which is where it lives."
 
 from __future__ import annotations
 
-import json
-
 from starlette.testclient import TestClient
 
 from hrms_mcp import onboarding_admin
@@ -22,7 +20,8 @@ from tests.test_server import (  # noqa: F401, F811 - pytest fixtures
 
 LIST = {"in_progress": [{
     "employee": "Ethan Parker", "employee_code": "H101", "progress": "5 of 8 steps done",
-    "current_step": "HR orientation scheduled", "needs_hr": ["Jira: has no Jira account yet"],
+    "current_step": "HR orientation scheduled",
+    "needs_hr": ["Setup email sent failed: no personal email"],
 }]}
 STATUS = {
     "employee": "Ethan Parker", "employee_code": "H101", "status": "in_progress",
@@ -43,11 +42,30 @@ def _sent(fake: FakeHrms, tool: str) -> list[dict]:
     return [c["arguments"] for c in fake.calls() if c["name"] == tool]
 
 
-def test_the_data_comes_back_untouched(client: TestClient, hrms: FakeHrms) -> None:  # noqa: F811
+def test_the_answers_are_plain_sentences_not_data(client: TestClient, hrms: FakeHrms) -> None:  # noqa: F811
     hrms.results["list_onboardings"] = LIST
     hrms.results["get_onboarding_status"] = STATUS
-    assert json.loads(text(call(client, "list_onboardings"))) == LIST
-    assert json.loads(text(call(client, "get_onboarding_status", {"employee": "Ethan"}))) == STATUS
+    listed = text(call(client, "list_onboardings"))
+    assert listed == (
+        "1 person is being onboarded:\n"
+        "• Ethan Parker (H101) — 5 of 8 steps done; now on: HR orientation scheduled; "
+        "waiting on HR: Setup email sent failed: no personal email."
+    )
+    status = text(call(client, "get_onboarding_status", {"employee": "Ethan"}))
+    assert status.startswith(
+        "Ethan Parker (H101) — onboarding in progress: 5 of 8 steps done. "
+        "Started Mon 2 Nov, 10:00 (IST)."
+    )
+    assert "• Setup email sent — failed: no personal email on the profile" in status
+    for said in (listed, status):
+        assert "{" not in said and '"' not in said
+        for internal in ("employee_code", "current_step", "needs_hr", "setup_email"):
+            assert internal not in said, internal
+
+
+def test_nobody_being_onboarded_is_said_in_words(client: TestClient, hrms: FakeHrms) -> None:  # noqa: F811
+    hrms.results["list_onboardings"] = {"in_progress": []}
+    assert text(call(client, "list_onboardings")) == "No one is being onboarded right now."
 
 
 def test_a_request_goes_through_as_hr_said_it(client: TestClient, hrms: FakeHrms) -> None:  # noqa: F811
@@ -56,28 +74,43 @@ def test_a_request_goes_through_as_hr_said_it(client: TestClient, hrms: FakeHrms
         hrms.results[tool] = CHANGED
     call(client, "get_onboarding_status", {"employee": "  Ethan  "})
     call(client, "retry_onboarding_step", {"employee": " Ethan Parker ", "step": " setup email "})
-    call(client, "require_onboarding_step", {"employee": "Ethan", "step": "Jira"})
+    call(client, "require_onboarding_step", {"employee": "Ethan", "step": "documents"})
     call(client, "mark_onboarding_step_not_required",
-         {"employee": "Ethan", "step": "jira", "reason": " internal project "})
-    call(client, "mark_onboarding_step_not_required", {"employee": "Ethan", "step": "jira"})
+         {"employee": "Ethan", "step": "documents", "reason": " internal project "})
+    call(client, "mark_onboarding_step_not_required", {"employee": "Ethan", "step": "documents"})
     call(client, "start_onboarding", {"employee": "Priya"})
     assert _sent(hrms, "get_onboarding_status") == [{"employee": "Ethan"}]
     assert _sent(hrms, "retry_onboarding_step") == [
         {"employee": "Ethan Parker", "step": "setup email"}
     ]
-    assert _sent(hrms, "require_onboarding_step") == [{"employee": "Ethan", "step": "Jira"}]
+    assert _sent(hrms, "require_onboarding_step") == [{"employee": "Ethan", "step": "documents"}]
     assert _sent(hrms, "mark_onboarding_step_not_required") == [
-        {"employee": "Ethan", "step": "jira", "reason": "internal project"},
-        {"employee": "Ethan", "step": "jira", "reason": ""},
+        {"employee": "Ethan", "step": "documents", "reason": "internal project"},
+        {"employee": "Ethan", "step": "documents", "reason": ""},
     ]
     assert _sent(hrms, "start_onboarding") == [{"employee": "Priya"}]
 
 
-def test_a_change_returns_what_the_hrms_said(client: TestClient, hrms: FakeHrms) -> None:  # noqa: F811
+def test_a_change_says_what_happened_in_a_sentence(client: TestClient, hrms: FakeHrms) -> None:  # noqa: F811
     hrms.results["retry_onboarding_step"] = CHANGED
     result = call(client, "retry_onboarding_step", {"employee": "Ethan", "step": "setup email"})
     assert not result.get("isError")
-    assert json.loads(text(result)) == CHANGED
+    assert text(result) == (
+        "Setup email sent for Ethan Parker is back on the list to be done. "
+        "Onboarding: 5 of 8 steps done."
+    )
+    hrms.results["start_onboarding"] = {
+        "employee": "Priya", "started": True, "progress": "0 of 9 steps done",
+        "started_on": "Fri 30 Oct, 11:00 (IST)",
+    }
+    assert text(call(client, "start_onboarding", {"employee": "Priya"})) == (
+        "Started Priya's onboarding on Fri 30 Oct, 11:00 (IST); the setup email is on its way. "
+        "0 of 9 steps done."
+    )
+    hrms.results["start_onboarding"]["started"] = False
+    assert "had already begun on Fri 30 Oct, 11:00 (IST) — nothing was changed" in text(
+        call(client, "start_onboarding", {"employee": "Priya"})
+    )
 
 
 def test_an_employee_is_told_only_hr_can(client: TestClient, hrms: FakeHrms) -> None:  # noqa: F811
@@ -89,8 +122,8 @@ def test_an_employee_is_told_only_hr_can(client: TestClient, hrms: FakeHrms) -> 
         assert text(result) == NOT_HR_ADMIN, tool
     for tool, args in (
         ("retry_onboarding_step", {"employee": "Ethan", "step": "setup email"}),
-        ("mark_onboarding_step_not_required", {"employee": "Ethan", "step": "jira"}),
-        ("require_onboarding_step", {"employee": "Ethan", "step": "jira"}),
+        ("mark_onboarding_step_not_required", {"employee": "Ethan", "step": "documents"}),
+        ("require_onboarding_step", {"employee": "Ethan", "step": "documents"}),
         ("start_onboarding", {"employee": "Ethan"}),
     ):
         result = call(client, tool, args)
@@ -100,7 +133,7 @@ def test_an_employee_is_told_only_hr_can(client: TestClient, hrms: FakeHrms) -> 
 
 def test_the_hrms_refusals_reach_hr_in_its_words(client: TestClient, hrms: FakeHrms) -> None:  # noqa: F811
     hrms.errors["retry_onboarding_step"] = "only a failed step can be retried"
-    result = call(client, "retry_onboarding_step", {"employee": "Ethan", "step": "jira"})
+    result = call(client, "retry_onboarding_step", {"employee": "Ethan", "step": "documents"})
     assert result["isError"]
     assert "only a failed step can be retried" in text(result)
     hrms.errors["get_onboarding_status"] = (
@@ -134,9 +167,9 @@ def test_the_guide_for_each_tool_reaches_the_model(client: TestClient) -> None: 
     for name in TOOLS:
         assert said[name], f"{name} has no description"
         assert "HRMS admins only" in said[name], name
-    assert "One short line per person" in said["list_onboardings"]
-    assert "An empty list means nobody is being onboarded" in said["list_onboardings"]
-    assert "never show a `key` or an id" in said["get_onboarding_status"]
+    for name in TOOLS:  # every answer is a finished sentence, never data
+        assert "relay it as it is" in said[name], name
+        assert "never show data, field names, tool names or JSON" in said[name], name
     assert "it fits several people the tool says so — ask HR which" in said["get_onboarding_status"]
     retry = said["retry_onboarding_step"]
     assert "pass them as said" in retry and "call get_onboarding_status" in retry
@@ -161,6 +194,6 @@ def test_no_change_tool_offers_to_complete_a_step(client: TestClient) -> None:  
 def test_there_is_no_list_of_step_names_here() -> None:
     """HR's words are matched against the steps by the HRMS; none are kept here."""
     source = open(onboarding_admin.__file__, encoding="utf-8").read()
-    for internal in ("setup_email", "slack_joined", "jira_access", "documents_uploaded",
+    for internal in ("setup_email", "slack_joined", "documents_uploaded",
                      "profile_confirmed", "orientation_scheduled", "first_login"):
         assert internal not in source, internal

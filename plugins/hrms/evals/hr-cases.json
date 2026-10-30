@@ -121,13 +121,13 @@
     {
       "id": "onboarding-lists-who-is-onboarding",
       "ask": "Who's still onboarding?",
-      "expect": { "outcome": "answered", "no_action": true, "not_mention": ["setup_email", "jira_access", "slack_joined"] },
+      "expect": { "outcome": "answered", "no_action": true, "not_mention": ["setup_email", "slack_joined", "first_login"] },
       "reference": "One short line per person being onboarded: name, progress and the step they are on, with what needs HR after it when there is something; or that nobody is. Never an internal step key or an id. Cites the result."
     },
     {
       "id": "onboarding-status-of-one-person",
       "ask": "What's Ethan Parker's onboarding status?",
-      "expect": { "outcome": "answered", "no_action": true, "mention": ["Ethan"], "not_mention": ["setup_email", "jira_access", "slack_joined", "first_login"] },
+      "expect": { "outcome": "answered", "no_action": true, "mention": ["Ethan"], "not_mention": ["setup_email", "slack_joined", "first_login"] },
       "reference": "A first line with the name, the progress and when it started; then the steps in order, each with its status in plain words and any note or error; the orientation and latest reminders only if there are any. Steps by their names, never their keys."
     },
     {
@@ -142,10 +142,10 @@
     },
     {
       "id": "onboarding-excuse-is-a-card",
-      "ask": "Ethan Parker is on an internal project, so mark Jira not required for him",
+      "ask": "Ethan Parker already has a Slack account, so mark the Slack invitation not required for him",
       "expect": {
         "outcome": "answered",
-        "action": { "tool": "mark_onboarding_step_not_required", "state": "proposed", "arguments": { "employee": "Ethan", "step": "Jira", "reason": "internal" } },
+        "action": { "tool": "mark_onboarding_step_not_required", "state": "proposed", "arguments": { "employee": "Ethan", "step": "Slack invitation", "reason": "already has a Slack account" } },
         "not_mention": ["shall I go ahead"]
       },
       "reference": "The not-required card for Confirm, carrying HR's reason as given; the bot does not ask for one."
@@ -165,6 +165,12 @@
         "not_mention": ["shall I go ahead"]
       },
       "reference": "A card for complete_orientation naming Ethan Parker — HR's say-so that it happened is the trigger. Never asks for confirmation itself."
+    },
+    {
+      "id": "onboarding-answers-are-plain-sentences",
+      "ask": "Who is being onboarded right now?",
+      "expect": { "outcome": "answered", "no_action": true, "not_mention": ["employee_code", "needs_hr", "current_step", "{", "list_onboardings"] },
+      "reference": "A short list in plain words — name, progress, the step they are on, and what waits on HR. Never field names, braces, tool names or ids."
     }
   ]
 }

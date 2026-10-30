@@ -19,6 +19,7 @@ several, and is said as recorded, with who is still to decide.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from mcp.server.mcpserver import Context, MCPServer
@@ -46,6 +47,34 @@ UNDOES = ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint
 
 async def _mine(hrms: Hrms, ctx: Context) -> list[dict[str, Any]]:
     return list(await _ask(hrms, ctx, "get_leaves", {}) or [])
+
+
+def one_to_cancel(
+    held: list[dict[str, Any]],
+    *,
+    none: str,
+    many: str,
+    already: Callable[[dict[str, Any]], str],
+    ref: str,
+) -> dict[str, Any] | str:
+    """Which of the person's requests for one day a cancel is about.
+
+    ``held`` is every request of theirs for that day. Returns the single Pending
+    or Approved one to cancel, or — when none is open but one was already cancelled
+    — the sentence saying so (``already`` words it from that request). Refused when
+    there is none, more than one (``many``), or no reference (``ref``) to send.
+    """
+    open_ones = [i for i in held if str(i.get("status")) in ("Pending", "Approved")]
+    if not open_ones:
+        cancelled = next((i for i in held if str(i.get("status")) == "Cancelled"), None)
+        if cancelled is not None:
+            return f"Already cancelled: {already(cancelled)}. Nothing changed."
+        raise ToolError(none)
+    if len(open_ones) > 1:
+        raise ToolError(many)
+    if open_ones[0].get(ref) in (None, ""):
+        raise ToolError("The HRMS gave no reference for that request. Cancel it in the HRMS.")
+    return open_ones[0]
 
 
 async def _checked(

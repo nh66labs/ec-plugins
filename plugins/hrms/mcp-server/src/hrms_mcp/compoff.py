@@ -31,7 +31,7 @@ from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
 from hrms_mcp.hrms import Hrms
 from hrms_mcp.tools import _ask, _today, approvers_sentence, date_in, day_of, warning_of
-from hrms_mcp.writes import FILES, _waiting_for
+from hrms_mcp.writes import FILES, UNDOES, _waiting_for, one_to_cancel
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False)
 
@@ -360,3 +360,45 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         status = str((filed.get("status") if isinstance(filed, dict) else "") or "Pending")
         waiting = await _waiting_for(hrms, ctx) if status == "Pending" else ""
         return f"Filed: {what} — reason: {reason.strip()}. Status: {status}.{waiting}"
+
+    @server.tool(annotations=UNDOES, structured_output=False)
+    async def cancel_my_comp_off(work_date: str, ctx: Context) -> str:
+        """Withdraw one of the person's own comp-off requests, pending or
+        approved and with its day off not yet taken. work_date is the day worked
+        (YYYY-MM-DD)."""
+        worked = _worked(work_date).isoformat()
+        # The HRMS does not check whose a comp-off is, so only the person's own
+        # history is looked through: an id not in it is never sent.
+        history, today = await asyncio.gather(
+            _ask(hrms, ctx, "get_comp_off_history", {}), _today_of(hrms, ctx)
+        )
+        held = [
+            item
+            for item in history or []
+            if isinstance(item, dict) and str(item.get("work_date", ""))[:10] == worked
+        ]
+
+        def described(item: dict[str, Any]) -> str:
+            line = comp_off_line(worked, str(item.get("off_date") or "")[:10])
+            return f"{line[:1].lower()}{line[1:]}"
+
+        item = one_to_cancel(
+            held,
+            none=f"The person has no comp-off for {day_of(worked)} that can be cancelled.",
+            many=(
+                f"The person has more than one comp-off for {day_of(worked)}. "
+                "Cancel it in the HRMS instead."
+            ),
+            already=described,
+            ref="id",
+        )
+        if isinstance(item, str):
+            return item
+        off = str(item.get("off_date") or "")[:10]
+        if today and item.get("status") == "Approved" and off and off < today.isoformat():
+            raise ToolError(
+                f"The day off for that comp-off ({day_of(off)}) has already passed, so it "
+                "is not cancelled here. Tell the person to ask HR."
+            )
+        await _ask(hrms, ctx, "cancel_comp_off", {"comp_off_id": str(item["id"])})
+        return f"Cancelled: {described(item)[:1].upper()}{described(item)[1:]}."
