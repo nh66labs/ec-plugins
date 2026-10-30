@@ -10,6 +10,8 @@ the person who asked.
 
 from __future__ import annotations
 
+import logging
+
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
@@ -17,6 +19,8 @@ from hrms_mcp.hrms import Hrms
 from hrms_mcp.my_onboarding import _at, _profile_links
 from hrms_mcp.tools import _ask
 from hrms_mcp.writes import FILES
+
+log = logging.getLogger("hrms_mcp")
 
 #: How the HRMS says the form went.
 FORM_SENT = "sent"
@@ -60,7 +64,8 @@ def register(server: MCPServer, hrms: Hrms, dashboard_url: str = "") -> None:
     async def start_profile_update(ctx: Context) -> str:
         try:
             sent = await _ask(hrms, ctx, "start_profile_update", {})
-        except ToolError:
+        except ToolError as e:
+            log.warning("start_profile_update failed: %s", e)
             sent = {}
         outcome = str(sent.get("form") or "") if isinstance(sent, dict) else ""
         if outcome == FORM_SENT:
@@ -73,5 +78,5 @@ def register(server: MCPServer, hrms: Hrms, dashboard_url: str = "") -> None:
         why = {
             FORM_NOT_IN_SLACK: "you aren't in the company Slack yet",
             FORM_SLACK_OFF: "Slack messages from the HR assistant are switched off",
-        }.get(outcome, "the form couldn't be sent just now")
+        }.get(outcome, "something went wrong sending it — you can try asking again in a minute")
         return elsewhere_answer(why, dashboard_url, employee_id)
