@@ -1973,3 +1973,54 @@ def test_a_cancel_without_a_reference_sends_nothing(client: TestClient, hrms: Fa
     assert call(client, "cancel_my_wfh", {"date_from": "2026-10-26"})["isError"] is True
     assert call(client, "cancel_my_comp_off", {"work_date": "2026-10-02"})["isError"] is True
     assert _called(hrms, "cancel_wfh") == [] and _called(hrms, "cancel_comp_off") == []
+
+
+def test_cancel_my_wfh_says_already_cancelled_even_beside_a_rejected_one(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    hrms.results["get_wfh_history"] = [
+        {"wfh_id": "w-1", "date_from": "2026-10-26", "date_to": "2026-10-28",
+         "mode": "Full Day", "status": "Cancelled"},
+        {"wfh_id": "w-2", "date_from": "2026-10-26", "date_to": "2026-10-26",
+         "mode": "Full Day", "status": "Rejected"},
+    ]
+    said = text(call(client, "cancel_my_wfh", {"date_from": "2026-10-26"}))
+    assert said == (
+        "Already cancelled: work from home from Mon 26 Oct 2026 to Wed 28 Oct 2026, "
+        "full day. Nothing changed."
+    )
+    assert _called(hrms, "cancel_wfh") == []
+
+
+def test_an_approved_wfh_that_is_over_is_not_cancelled(client: TestClient, hrms: FakeHrms) -> None:
+    _today_is(hrms, "2026-11-20")
+    hrms.results["get_wfh_history"] = [
+        {"wfh_id": "w-1", "date_from": "2026-10-26", "date_to": "2026-10-26",
+         "mode": "Full Day", "status": "Approved"},
+    ]
+    refused = call(client, "cancel_my_wfh", {"date_from": "2026-10-26"})
+    assert refused["isError"] is True and "already over" in text(refused)
+    assert _called(hrms, "cancel_wfh") == []
+
+
+def test_a_comp_off_whose_day_off_has_passed_is_not_cancelled(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    _today_is(hrms, "2026-11-20")
+    hrms.results["get_comp_off_history"] = [
+        {"id": 7, "work_date": "2026-10-02", "off_date": "2026-11-02", "status": "Approved"},
+    ]
+    refused = call(client, "cancel_my_comp_off", {"work_date": "2026-10-02"})
+    assert refused["isError"] is True and "already passed" in text(refused)
+    assert _called(hrms, "cancel_comp_off") == []
+
+
+def test_a_pending_comp_off_is_cancelled_even_with_the_day_in_the_past(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    _today_is(hrms, "2026-11-20")
+    hrms.results["get_comp_off_history"] = [
+        {"id": 7, "work_date": "2026-10-02", "off_date": "2026-11-02", "status": "Pending"},
+    ]
+    call(client, "cancel_my_comp_off", {"work_date": "2026-10-02"})
+    assert _called(hrms, "cancel_comp_off") == [{"comp_off_id": "7"}]

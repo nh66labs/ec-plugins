@@ -25,6 +25,7 @@ from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
+from hrms_mcp.compoff import _today_of
 from hrms_mcp.forms import PORTIONS, _portion_named
 from hrms_mcp.hrms import Hrms
 from hrms_mcp.tools import (
@@ -36,7 +37,7 @@ from hrms_mcp.tools import (
     warning_of,
     when_of,
 )
-from hrms_mcp.writes import FILES, UNDOES, _waiting_for
+from hrms_mcp.writes import FILES, UNDOES, _waiting_for, one_to_cancel
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False)
 
@@ -216,32 +217,44 @@ def register(server: MCPServer, hrms: Hrms) -> None:
     @server.tool(annotations=UNDOES, structured_output=False)
     async def cancel_my_wfh(date_from: str, ctx: Context) -> str:
         """Withdraw one of the person's own work-from-home requests, pending or
-        approved. date_from is the first day of the request (YYYY-MM-DD)."""
+        approved and not yet over. date_from is the first day of the request
+        (YYYY-MM-DD)."""
         date_from, _ = dates_of(date_from, "")
+        history, today = await asyncio.gather(
+            _ask(hrms, ctx, "get_wfh_history", {}), _today_of(hrms, ctx)
+        )
         held = [
             item
-            for item in await _ask(hrms, ctx, "get_wfh_history", {}) or []
+            for item in history or []
             if isinstance(item, dict) and str(item.get("date_from", ""))[:10] == date_from
         ]
-        open_ones = [i for i in held if str(i.get("status")) in ("Pending", "Approved")]
-        if not open_ones:
-            if held and all(str(i.get("status")) == "Cancelled" for i in held):
-                what = wfh_line(date_from, date_from)
-                return f"Already cancelled: {what[:1].lower()}{what[1:]}. Nothing changed."
-            raise ToolError(
+
+        def described(item: dict[str, Any]) -> str:
+            line = wfh_line(
+                date_from, str(item.get("date_to", ""))[:10] or date_from, str(item.get("mode", ""))
+            )
+            return f"{line[:1].lower()}{line[1:]}"
+
+        item = one_to_cancel(
+            held,
+            none=(
                 f"The person has no work-from-home request starting {day_of(date_from)} "
                 "that can be cancelled."
-            )
-        if len(open_ones) > 1:
-            raise ToolError(
+            ),
+            many=(
                 f"The person has more than one work-from-home request starting "
                 f"{day_of(date_from)}. Cancel it in the HRMS instead."
-            )
-        item = open_ones[0]
-        if not item.get("wfh_id"):
-            raise ToolError("The HRMS gave no reference for that request. Cancel it in the HRMS.")
-        what = wfh_line(
-            date_from, str(item.get("date_to", ""))[:10] or date_from, str(item.get("mode", ""))
+            ),
+            already=described,
+            ref="wfh_id",
         )
+        if isinstance(item, str):
+            return item
+        ends = str(item.get("date_to", ""))[:10] or date_from
+        if today and item.get("status") == "Approved" and ends < today.isoformat():
+            raise ToolError(
+                f"That work from home ({when_of(date_from, ends)}) is already over, so it "
+                "is not cancelled here. Tell the person to ask HR."
+            )
         await _ask(hrms, ctx, "cancel_wfh", {"wfh_id": str(item["wfh_id"])})
-        return f"Cancelled: {what}."
+        return f"Cancelled: {described(item)[:1].upper()}{described(item)[1:]}."
