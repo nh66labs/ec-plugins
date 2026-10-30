@@ -267,8 +267,8 @@ def test_the_calendar_is_mentioned_only_when_it_happened_or_failed(
     client: TestClient, hrms: FakeHrms  # noqa: F811
 ) -> None:
     cases = {
-        "added": "It is on your calendar, and a calendar invitation has been sent to them.",
-        "updated": "The calendar event was updated, and they have been sent the change.",
+        "added": "The calendar event has been created.",
+        "updated": "The calendar event was updated.",
     }
     for state, sentence in cases.items():
         hrms.results["confirm_orientation"] = {**CONFIRMED, "calendar": state}

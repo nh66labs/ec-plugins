@@ -27,22 +27,40 @@ def _need(data: Any, what: str) -> dict[str, Any]:
     return data
 
 
+def _s(value: Any) -> str:
+    """A field as text, empty when the HRMS left it out — never the word "None"."""
+    return "" if value is None else str(value).strip()
+
+
+def _rows(value: Any) -> list[dict[str, Any]]:
+    """The dict rows of a list the HRMS sent; anything else in it is left out."""
+    return [row for row in value if isinstance(row, dict)] if isinstance(value, list) else []
+
+
+def _texts(value: Any) -> list[str]:
+    """A list of texts; a lone text is one item, not a string to split into letters."""
+    items = [value] if isinstance(value, str) else value if isinstance(value, list) else []
+    return [text for item in items if (text := _s(item))]
+
+
 def _told(state: str) -> str:
     return {
         "sent": "They have been told.",
         "failed": "I could not deliver it to them, so please let them know yourself.",
         "skipped": "Slack messages are switched off, so they were not told — please let "
         "them know yourself.",
-    }.get(state, "They could not be reached by Slack or email, so please let them know yourself.")
+        "not_sent": "They could not be reached by Slack or email, so please let them know "
+        "yourself.",
+    }.get(state, "I could not tell whether they were told, so please check with them.")
 
 
 def _calendar(r: dict[str, Any]) -> str:
     """Whether the orientation reached Google Calendar, said only when it matters."""
     state = r.get("calendar")
     if state == "added":
-        return " It is on your calendar, and a calendar invitation has been sent to them."
+        return " The calendar event has been created."
     if state == "updated":
-        return " The calendar event was updated, and they have been sent the change."
+        return " The calendar event was updated."
     if state == "failed":
         why = f" ({r['calendar_error']})" if r.get("calendar_error") else ""
         return f" I could not put it on the calendar{why}, so please add it yourself."
@@ -51,51 +69,69 @@ def _calendar(r: dict[str, Any]) -> str:
 
 def orientation_confirmed(data: Any) -> str:
     r = _need(data, "whether the orientation was confirmed")
-    who, when, place = r.get("employee"), r.get("when"), r.get("place")
-    if not who or not when:
+    # The write is already done by now, so only what the sentence is about is required:
+    # a missing name or place is left out, not turned into a failure.
+    when = _s(r.get("when"))
+    if not when:
         raise ToolError("The HRMS did not confirm the orientation. Check the Onboarding card.")
-    was_when, was_place = r.get("was_when"), r.get("was_place")
-    if r.get("rescheduled") and was_when and was_when != when:
-        head = f"{who}'s HR orientation has been rescheduled from {was_when} to {when}, at {place}."
+    who, place = _s(r.get("employee")), _s(r.get("place"))
+    owner = f"{who}'s HR orientation" if who else "The HR orientation"
+    at = f", at {place}" if place else ""
+    was_when, was_place = _s(r.get("was_when")), _s(r.get("was_place"))
+    time_moved = bool(was_when) and was_when != when
+    place_moved = bool(was_place) and bool(place) and was_place != place
+    if r.get("rescheduled") and time_moved:
+        head = f"{owner} has been rescheduled from {was_when} to {when}{at}."
+    elif r.get("rescheduled") and place_moved:
+        head = f"{owner} stays on {when}, but the place has changed from {was_place} to {place}."
     elif r.get("rescheduled"):
-        head = (
-            f"{who}'s HR orientation stays on {when}, but the place has changed from "
-            f"{was_place} to {place}."
-        )
+        head = f"{owner} has been rescheduled; it is now on {when}{at}."
     else:
         head = (
-            f"{who}'s HR orientation is confirmed for {when}, at {place}. The \"HR "
+            f"{owner} is confirmed for {when}{at}. The \"HR "
             "orientation scheduled\" step is done; the onboarding finishes only after "
             "the orientation has been held, when HR marks it completed."
         )
-    return f"{head} {_told(str(r.get('employee_told') or ''))}{_calendar(r)}"
+    return f"{head} {_told(_s(r.get('employee_told')))}{_calendar(r)}"
 
 
 def orientation_completed(data: Any) -> str:
     r = _need(data, "whether the orientation was marked completed")
-    if r.get("orientation") != "completed" or not r.get("employee"):
+    if r.get("orientation") != "completed":
         raise ToolError(
             "The HRMS did not mark the orientation completed. Check the Onboarding card."
         )
-    head = f"{r['employee']}'s HR orientation is marked as completed."
+    who = _s(r.get("employee"))
+    head = f"{who}'s HR orientation is marked as completed." if who else (
+        "The HR orientation is marked as completed."
+    )
     if r.get("onboarding_complete"):
         return f"{head} Their onboarding is now complete — every step is done."
-    return f"{head} Their onboarding is not complete yet: {r.get('progress')}."
+    progress = _s(r.get("progress"))
+    return f"{head} Their onboarding is not complete yet" + (f": {progress}." if progress else ".")
+
+
+def _who(r: dict[str, Any]) -> str:
+    """"Priya (EC123)", the code only when the HRMS sent one."""
+    name, code = _s(r.get("employee")), _s(r.get("employee_code"))
+    return f"{name} ({code})" if name and code else name or code or "Someone"
 
 
 def onboarding_list(data: Any) -> str:
-    rows = list(_need(data, "who is being onboarded").get("in_progress") or [])
+    rows = _rows(_need(data, "who is being onboarded").get("in_progress"))
     if not rows:
         return "No one is being onboarded right now."
     lines = [
         f"{len(rows)} {'person is' if len(rows) == 1 else 'people are'} being onboarded:"
     ]
     for r in rows:
-        line = f"• {r.get('employee')} ({r.get('employee_code')}) — {r.get('progress')}"
-        if r.get("current_step"):
-            line += f"; now on: {r['current_step']}"
-        if r.get("needs_hr"):
-            line += "; waiting on HR: " + "; ".join(str(n) for n in r["needs_hr"])
+        line = f"• {_who(r)}"
+        if progress := _s(r.get("progress")):
+            line += f" — {progress}"
+        if step := _s(r.get("current_step")):
+            line += f"; now on: {step}"
+        if needs := _texts(r.get("needs_hr")):
+            line += "; waiting on HR: " + "; ".join(needs)
         lines.append(line + ".")
     return "\n".join(lines)
 
@@ -109,44 +145,46 @@ _STATUS_WORDS = {
 }
 
 
+def _plain(status: Any) -> str:
+    """A status in words people use; one we have no word for is shown as it is."""
+    key = _s(status)
+    return _STATUS_WORDS.get(key, key.replace("_", " ")) or "unknown"
+
+
 def onboarding_status(data: Any) -> str:
     s = _need(data, "where the onboarding stands")
-    state = "complete" if s.get("status") == "completed" else "in progress"
-    head = (
-        f"{s.get('employee')} ({s.get('employee_code')}) — onboarding {state}: "
-        f"{s.get('progress')}"
-    )
-    if s.get("started"):
-        head += f". Started {s['started']}"
-    if s.get("completed"):
-        head += f", completed {s['completed']}"
+    status = _s(s.get("status"))
+    state = "complete" if status == "completed" else _plain(status) if status else "in progress"
+    head = f"{_who(s)} — onboarding {state}"
+    if progress := _s(s.get("progress")):
+        head += f": {progress}"
+    if started := _s(s.get("started")):
+        head += f". Started {started}"
+    if completed := _s(s.get("completed")):
+        head += f", completed {completed}"
     lines = [head + "."]
-    for st in s.get("steps") or []:
-        word = _STATUS_WORDS.get(str(st.get("status")), str(st.get("status")))
-        line = f"• {st.get('step')} — {word}"
-        if st.get("error"):
-            line += f": {st['error']}"
-        elif st.get("note"):
-            line += f": {st['note']}"
+    for st in _rows(s.get("steps")):
+        line = f"• {_s(st.get('step')) or 'A step'} — {_plain(st.get('status'))}"
+        if detail := _s(st.get("error")) or _s(st.get("note")):
+            line += f": {detail}"
         lines.append(line)
     o = s.get("orientation")
     if isinstance(o, dict):
         if o.get("status") == "confirmed":
-            lines.append(f"HR orientation: {o.get('confirmed_for')}, at {o.get('place')}.")
-        elif o.get("proposed_times"):
+            place = _s(o.get("place"))
+            when = _s(o.get("confirmed_for"))
+            lines.append(f"HR orientation: {when}" + (f", at {place}." if place else "."))
+        elif times := _texts(o.get("proposed_times")):
             lines.append(
-                "HR orientation: they proposed " + "; ".join(o["proposed_times"])
+                "HR orientation: they proposed " + "; ".join(times)
                 + " — waiting for HR to confirm one."
             )
-    reminders = s.get("reminders_latest") or []
+    reminders = [
+        f"{_s(r.get('when'))} by {_s(r.get('channel'))} ({_s(r.get('status'))})"
+        for r in _rows(s.get("reminders_latest"))
+    ]
     if reminders:
-        lines.append(
-            "Latest reminders: "
-            + "; ".join(
-                f"{r.get('when')} by {r.get('channel')} ({r.get('status')})" for r in reminders
-            )
-            + "."
-        )
+        lines.append("Latest reminders: " + "; ".join(reminders) + ".")
     return "\n".join(lines)
 
 
@@ -161,22 +199,27 @@ _CHANGE_WORDS = {
 
 def step_change(data: Any) -> str:
     r = _need(data, "what happened to the step")
-    word = _CHANGE_WORDS.get(str(r.get("status")), f"is now {r.get('status')}")
-    line = f"{r.get('step')} for {r.get('employee')} {word}. Onboarding: {r.get('progress')}."
-    if r.get("note"):
-        line += f" Note: {r['note']}"
+    status = _s(r.get("status"))
+    word = _CHANGE_WORDS.get(status, f"is now {_plain(status)}")
+    line = f"{_s(r.get('step')) or 'The step'} for {_s(r.get('employee')) or 'them'} {word}."
+    if progress := _s(r.get("progress")):
+        line += f" Onboarding: {progress}."
+    if note := _s(r.get("note")):
+        line += f" Note: {note}"
     return line
 
 
 def onboarding_started(data: Any) -> str:
     r = _need(data, "whether the onboarding started")
-    who = r.get("employee")
+    who = _s(r.get("employee")) or "The"
+    on = _s(r.get("started_on"))
+    progress = f" {_s(r.get('progress'))}." if _s(r.get("progress")) else ""
     if r.get("started"):
         return (
-            f"Started {who}'s onboarding on {r.get('started_on')}; the setup email is on its "
-            f"way. {r.get('progress')}."
+            f"Started {who}'s onboarding" + (f" on {on}" if on else "")
+            + f"; the setup email is on its way.{progress}"
         )
     return (
-        f"{who}'s onboarding had already begun on {r.get('started_on')} — nothing was "
-        f"changed. {r.get('progress')}."
+        f"{who}'s onboarding had already begun" + (f" on {on}" if on else "")
+        + f" — nothing was changed.{progress}"
     )

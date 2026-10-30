@@ -72,3 +72,48 @@ def test_anything_that_is_not_an_answer_is_an_error_not_a_guess() -> None:
         say.orientation_confirmed({})
     with pytest.raises(ToolError):
         say.orientation_completed({"employee": "Ada", "orientation": "pending"})
+
+
+def test_a_missing_field_is_left_out_never_written_as_none() -> None:
+    said = say.onboarding_list({"in_progress": [{"employee": "Priya", "progress": None}]})
+    assert "None" not in said and "Priya" in said
+    said = say.onboarding_status({"employee": "Priya", "steps": [{"step": "Email"}]})
+    assert "None" not in said
+    said = say.orientation_confirmed({"when": "Tue 3 Nov, 11:00", "rescheduled": True})
+    assert "None" not in said and "Tue 3 Nov, 11:00" in said
+
+
+def test_odd_shapes_do_not_break_the_answer() -> None:
+    said = say.onboarding_list({"in_progress": [
+        "not a row", {"employee": "Priya", "needs_hr": "wait for docs"},
+    ]})
+    assert "waiting on HR: wait for docs" in said
+    said = say.onboarding_status({
+        "employee": "Priya", "status": "cancelled", "steps": ["junk"],
+        "orientation": {"proposed_times": [{"at": "x"}]},
+    })
+    assert "cancelled" in said and "in progress" not in said
+
+
+def test_an_unknown_told_state_is_not_called_unreachable() -> None:
+    said = say.orientation_confirmed({"when": "Tue 3 Nov", "place": "Room 2",
+                                      "employee_told": "queued"})
+    assert "could not tell whether they were told" in said
+    assert "could not be reached" not in said
+
+
+def test_the_reschedule_says_only_what_changed() -> None:
+    both_same = say.orientation_confirmed({
+        "employee": "Ada", "when": "Tue 3 Nov", "place": "Room 2",
+        "rescheduled": True, "was_when": "Tue 3 Nov",
+    })
+    assert "changed from" not in both_same
+    place = say.orientation_confirmed({
+        "employee": "Ada", "when": "Tue 3 Nov", "place": "Room 2",
+        "rescheduled": True, "was_when": "Tue 3 Nov", "was_place": "Room 1",
+    })
+    assert "from Room 1 to Room 2" in place
+
+
+def test_a_done_write_without_a_name_is_still_reported_as_done() -> None:
+    assert "completed" in say.orientation_completed({"orientation": "completed"})
