@@ -5,8 +5,6 @@ where their orientation stands."""
 
 from __future__ import annotations
 
-import json
-
 from starlette.testclient import TestClient
 
 from hrms_mcp import my_onboarding, orientation
@@ -70,8 +68,14 @@ def test_confirming_sends_only_what_hr_said(client: TestClient, hrms: FakeHrms) 
     padded = {**ARGS, "employee": "  Ethan  ", "place": " Room 2 "}
     result = call(client, "confirm_orientation", padded)
     assert not result.get("isError"), text(result)
-    # The data, as the HRMS gave it — the assistant words it, from the guide.
-    assert json.loads(text(result)) == CONFIRMED
+    # A sentence, not the HRMS's data: HR never reads field names or braces.
+    said = text(result)
+    assert (
+        "Ethan Parker's HR orientation is confirmed for Tue 3 Nov, 11:00 (IST), at Room 2."
+        in said
+    )
+    assert "They have been told." in said
+    assert "{" not in said and "employee_told" not in said
     [sent] = _sent(hrms, "confirm_orientation")
     assert sent == ARGS | {"employee": "Ethan"}
     assert not {"employee_id", "caller_id"} & set(sent)
@@ -114,8 +118,9 @@ def test_the_tools_carry_no_person_and_the_guide_is_in_the_description(client: T
         assert not {"employee_id", "caller_id"} & properties, name
     said = " ".join(tools["confirm_orientation"]["description"].split())
     for rule in (
-        "from employee_told",
-        'Never say they were told unless it says "sent"',
+        "relay it as it is",
+        "never show data, field names, tool names or JSON",
+        "so do",
         "Call list_orientation_requests first",
         "tell them, citing it, and stop",
         "Never guess a place",
@@ -134,13 +139,18 @@ HELD = {
 }
 
 
-def test_marking_it_held_sends_only_the_person_and_hands_back_the_data(
+def test_marking_it_held_sends_only_the_person_and_answers_in_a_sentence(
     client: TestClient, hrms: FakeHrms  # noqa: F811
 ) -> None:
     hrms.results["complete_orientation"] = HELD
     result = call(client, "complete_orientation", {"employee": "  Ethan  "})
     assert not result.get("isError"), text(result)
-    assert json.loads(text(result)) == HELD
+    said = text(result)
+    assert said == (
+        "Ethan Parker's HR orientation is marked as completed. "
+        "Their onboarding is now complete — every step is done."
+    )
+    assert "{" not in said and "onboarding_complete" not in said
     [sent] = _sent(hrms, "complete_orientation")
     assert sent == {"employee": "Ethan"}
 
@@ -161,6 +171,17 @@ def test_the_refusals_for_marking_it_held_reach_hr_as_they_were_said(
     assert result["isError"] and "not been scheduled" in text(result)
 
 
+def test_marking_it_held_before_the_rest_is_done_says_what_is_open(
+    client: TestClient, hrms: FakeHrms  # noqa: F811
+) -> None:
+    hrms.results["complete_orientation"] = {
+        **HELD, "onboarding_complete": False, "progress": "7 of 9 steps done",
+    }
+    said = text(call(client, "complete_orientation", {"employee": "Ethan"}))
+    assert "is marked as completed" in said
+    assert "Their onboarding is not complete yet: 7 of 9 steps done." in said
+
+
 def test_an_answer_that_does_not_say_it_was_marked_is_an_error_not_a_guess(
     client: TestClient, hrms: FakeHrms  # noqa: F811
 ) -> None:
@@ -179,7 +200,7 @@ def test_marking_it_held_is_a_write_that_waits_until_it_has_happened(client: Tes
         "HAS happened",
         "never call it, before HR says the orientation has been held",
         'never ask "shall I go ahead?" yourself',
-        "from onboarding_complete",
+        "whether their onboarding is now complete",
     ):
         assert rule in said, rule
     # Confirming a time schedules it; the guide must not say it finishes the onboarding.
@@ -233,10 +254,55 @@ def test_once_confirmed_they_are_told_when_and_where() -> None:
 
 
 def test_hr_is_told_whether_the_employee_was_reached(client: TestClient, hrms: FakeHrms) -> None:  # noqa: F811
-    """The tool never states that the employee was told; it hands over whether."""
-    for state in ("sent", "failed", "skipped", "not_sent"):
+    """Only a delivered message is said to have reached them; anything else says to tell them."""
+    cases = (("sent", True), ("failed", False), ("skipped", False), ("not_sent", False))
+    for state, reached in cases:
         hrms.results["confirm_orientation"] = {**CONFIRMED, "employee_told": state}
-        result = call(client, "confirm_orientation", ARGS)
-        assert json.loads(text(result))["employee_told"] == state
-        assert "sent the date" not in text(result)
+        said = text(call(client, "confirm_orientation", ARGS))
+        assert ("They have been told." in said) is reached, state
+        assert ("let them know yourself" in said) is (not reached), state
+
+
+def test_the_calendar_is_mentioned_only_when_it_happened_or_failed(
+    client: TestClient, hrms: FakeHrms  # noqa: F811
+) -> None:
+    cases = {
+        "added": "It is on your calendar, and a calendar invitation has been sent to them.",
+        "updated": "The calendar event was updated, and they have been sent the change.",
+    }
+    for state, sentence in cases.items():
+        hrms.results["confirm_orientation"] = {**CONFIRMED, "calendar": state}
+        assert sentence in text(call(client, "confirm_orientation", ARGS)), state
+    hrms.results["confirm_orientation"] = {
+        **CONFIRMED, "calendar": "failed", "calendar_error": "Google refused the delegation",
+    }
+    said = text(call(client, "confirm_orientation", ARGS))
+    assert "I could not put it on the calendar (Google refused the delegation)" in said
+    assert "please add it yourself" in said
+    for quiet in ("not_set_up", "unchanged", ""):
+        hrms.results["confirm_orientation"] = {**CONFIRMED, "calendar": quiet}
+        said = text(call(client, "confirm_orientation", ARGS))
+        assert "calendar" not in said, quiet
+
+
+def test_a_changed_time_reads_as_rescheduled_and_a_changed_place_as_a_new_place(
+    client: TestClient, hrms: FakeHrms  # noqa: F811
+) -> None:
+    hrms.results["confirm_orientation"] = {
+        **CONFIRMED, "when": "Wed 4 Nov, 15:00 (IST)", "rescheduled": True,
+        "was_when": "Tue 3 Nov, 11:00 (IST)", "was_place": "Room 2",
+    }
+    said = text(call(client, "confirm_orientation", ARGS))
+    assert "rescheduled from Tue 3 Nov, 11:00 (IST) to Wed 4 Nov, 15:00 (IST), at Room 2." in said
+    assert "is confirmed for" not in said
+    hrms.results["confirm_orientation"] = {
+        **CONFIRMED, "place": "Room 5", "rescheduled": True,
+        "was_when": "Tue 3 Nov, 11:00 (IST)", "was_place": "Room 2",
+    }
+    said = text(call(client, "confirm_orientation", ARGS))
+    assert (
+        "stays on Tue 3 Nov, 11:00 (IST), but the place has changed from Room 2 to Room 5"
+        in said
+    )
+    assert "rescheduled" not in said
 

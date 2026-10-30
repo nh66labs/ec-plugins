@@ -19,8 +19,9 @@ from typing import Any
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
+from hrms_mcp import say
 from hrms_mcp.hrms import Hrms
-from hrms_mcp.onboarding import NOT_HR_ADMIN, NotAdmin, as_json, ask_admin
+from hrms_mcp.onboarding import NOT_HR_ADMIN, NotAdmin, ask_admin
 from hrms_mcp.tools import READ_ONLY
 from hrms_mcp.writes import FILES
 
@@ -84,15 +85,15 @@ def register(server: MCPServer, hrms: Hrms) -> None:
            A room or a meeting link will do.
         5. Propose this once; its card is HR's confirmation — never ask "shall I
            go ahead?" yourself. A refusal: say what it said and do not retry.
-        6. Afterwards, say who it is for, when and where, and that the "HR
-           orientation scheduled" step is complete — the onboarding finishes
-           only after the orientation is held, when HR marks it completed (say
-           so). Then say whether the employee
-           was told, from employee_told: "sent" — they have the date, time and
-           place; anything else ("failed", "skipped", "not_sent") — they were NOT
-           reached, so HR should let them know. Never say they were told unless
-           it says "sent".
+        6. Afterwards, relay its answer: it says who it is for, when and where,
+           whether the time was changed (a reschedule) or the place, and whether
+           the employee was told — when they were not reached it says to tell
+           them yourself, so do. The onboarding finishes only after the
+           orientation is held, when HR marks it completed.
         Safe to repeat; it also moves an orientation already confirmed.
+        Its answer is already written in plain words: relay it as it is (you may
+        shorten it, keeping every name, date and fact) — never show data, field
+        names, tool names or JSON.
         """
         if not place.strip():
             raise ToolError("Where is it? Ask HR for a room or a meeting link.")
@@ -110,9 +111,7 @@ def register(server: MCPServer, hrms: Hrms) -> None:
             )
         except NotAdmin:
             raise ToolError(NOT_HR_ADMIN) from None
-        if not isinstance(result, dict) or not result.get("when"):
-            raise ToolError("The HRMS did not confirm the orientation. Check the Onboarding card.")
-        return as_json(result)
+        return say.orientation_confirmed(result)
 
     @server.tool(annotations=FILES, structured_output=False)
     async def complete_orientation(employee: str, ctx: Context) -> str:
@@ -129,9 +128,11 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         3. Its card is HR's confirmation — never ask "shall I go ahead?"
            yourself. A refusal (for example, no time has been confirmed yet): say
            what it said and do not retry.
-        4. Afterwards, say who it is for, and from onboarding_complete whether
-           their onboarding is now complete (true) or what progress it is at.
-        Safe to repeat.
+        4. Afterwards, relay its answer: it says whose orientation it is and
+           whether their onboarding is now complete or what is still open.
+        Safe to repeat. Its answer is already written in plain words: relay it
+        as it is (you may shorten it, keeping every name, date and fact) —
+        never show data, field names, tool names or JSON.
         """
         try:
             result = await ask_admin(
@@ -139,9 +140,4 @@ def register(server: MCPServer, hrms: Hrms) -> None:
             )
         except NotAdmin:
             raise ToolError(NOT_HR_ADMIN) from None
-        if not isinstance(result, dict) or result.get("orientation") != "completed":
-            raise ToolError(
-                "The HRMS did not mark the orientation completed. Check the Onboarding card."
-            )
-        shown = ("employee", "orientation", "onboarding_complete", "progress")
-        return as_json({k: result[k] for k in shown if k in result})
+        return say.orientation_completed(result)
