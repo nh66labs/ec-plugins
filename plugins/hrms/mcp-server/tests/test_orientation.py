@@ -126,6 +126,68 @@ def test_the_tools_carry_no_person_and_the_guide_is_in_the_description(client: T
         assert rule in said, rule
 
 
+# --- marking it held ---------------------------------------------------------------
+
+HELD = {
+    "employee": "Ethan Parker", "orientation": "completed", "onboarding_complete": True,
+    "progress": "8 of 8 steps done",
+}
+
+
+def test_marking_it_held_sends_only_the_person_and_hands_back_the_data(
+    client: TestClient, hrms: FakeHrms  # noqa: F811
+) -> None:
+    hrms.results["complete_orientation"] = HELD
+    result = call(client, "complete_orientation", {"employee": "  Ethan  "})
+    assert not result.get("isError"), text(result)
+    assert json.loads(text(result)) == HELD
+    [sent] = _sent(hrms, "complete_orientation")
+    assert sent == {"employee": "Ethan"}
+
+
+def test_marking_it_held_as_an_employee_is_refused(client: TestClient, hrms: FakeHrms) -> None:  # noqa: F811
+    hrms.errors["complete_orientation"] = "access denied: admin only"
+    result = call(client, "complete_orientation", {"employee": "Ethan"})
+    assert result["isError"] and NOT_HR_ADMIN in text(result)
+
+
+def test_the_refusals_for_marking_it_held_reach_hr_as_they_were_said(
+    client: TestClient, hrms: FakeHrms  # noqa: F811
+) -> None:
+    hrms.errors["complete_orientation"] = (
+        "the orientation has not been scheduled yet — confirm a date, time and place first"
+    )
+    result = call(client, "complete_orientation", {"employee": "Ethan"})
+    assert result["isError"] and "not been scheduled" in text(result)
+
+
+def test_an_answer_that_does_not_say_it_was_marked_is_an_error_not_a_guess(
+    client: TestClient, hrms: FakeHrms  # noqa: F811
+) -> None:
+    hrms.results["complete_orientation"] = {"employee": "Ethan Parker"}
+    assert call(client, "complete_orientation", {"employee": "Ethan"})["isError"]
+
+
+def test_marking_it_held_is_a_write_that_waits_until_it_has_happened(client: TestClient) -> None:  # noqa: F811
+    tools = {t["name"]: t for t in rpc(client, "tools/list").json()["result"]["tools"]}
+    tool = tools["complete_orientation"]
+    assert tool["annotations"]["readOnlyHint"] is False
+    assert set(tool["inputSchema"]["required"]) == {"employee"}
+    assert not {"employee_id", "caller_id"} & set(tool["inputSchema"].get("properties", {}))
+    said = " ".join(tool["description"].split())
+    for rule in (
+        "HAS happened",
+        "never call it, before HR says the orientation has been held",
+        'never ask "shall I go ahead?" yourself',
+        "from onboarding_complete",
+    ):
+        assert rule in said, rule
+    # Confirming a time schedules it; the guide must not say it finishes the onboarding.
+    confirm = " ".join(tools["confirm_orientation"]["description"].split())
+    assert "does not complete the onboarding" in confirm
+    assert "HR marks it completed" in confirm
+
+
 # --- the employee's own view -----------------------------------------------------
 
 

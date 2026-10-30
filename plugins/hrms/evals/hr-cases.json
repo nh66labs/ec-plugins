@@ -155,6 +155,16 @@
       "ask": "Mark Ethan Parker's profile as confirmed",
       "expect": { "outcome": "answered", "no_action": true },
       "reference": "Says a step is completed only when it is verified, so it cannot be marked done from chat, and offers what can be done (for example that the employee confirms their profile, or that HR can mark the step not required). Proposes no card."
+    },
+    {
+      "id": "orientation-held-is-marked-by-hr",
+      "ask": "Ethan Parker's orientation is done, mark it as completed",
+      "expect": {
+        "outcome": "answered",
+        "action": { "tool": "complete_orientation", "state": "proposed", "arguments": { "employee": "Ethan Parker" } },
+        "not_mention": ["shall I go ahead"]
+      },
+      "reference": "A card for complete_orientation naming Ethan Parker — HR's say-so that it happened is the trigger. Never asks for confirmation itself."
     }
   ]
 }

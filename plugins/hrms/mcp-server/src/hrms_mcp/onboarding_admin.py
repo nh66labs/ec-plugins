@@ -30,7 +30,8 @@ from hrms_mcp.writes import FILES
 NEVER_COMPLETE = (
     "Never offer to mark a step completed, and never say one is: a step is completed "
     "only when it is verified (a sign-in, an upload, a join, a check) — if HR asks for "
-    "that, say so and offer what can be done."
+    "that, say so and offer what can be done. This tool never completes the HR "
+    "orientation; that is a separate tool."
 )
 
 

@@ -108,7 +108,8 @@ def onboarding_lines(ob: dict[str, Any], dashboard_url: str) -> str:
     if gaps:
         lines.append(
             f"Before you can confirm your profile, fill in your {_joined(gaps)} "
-            f"{_at('My Profile → Edit Profile', edit)}"
+            f"{_at('My Profile → Edit Profile', edit)}, or ask me to send you the private "
+            "profile form in Slack"
         )
     elif any(s.get("key") == "profile_confirmed" and s.get("status") != "completed" for s in steps):
         lines.append("Your profile is complete: you can confirm it now.")
@@ -137,7 +138,8 @@ def register(server: MCPServer, hrms: Hrms, dashboard_url: str = "") -> None:
         Call it when someone asks about their onboarding, what is left, or
         whether they can confirm their profile, and answer from it, citing
         it. It names missing details (PAN, Aadhaar, bank details) — never ask
-        anyone to type those into the chat; point them to the link it gives.
+        anyone to type those into the chat; offer to send them the private
+        profile form (start_profile_update), or point them to the link it gives.
         """
         try:
             ob = await _ask(hrms, ctx, "get_my_onboarding", {})

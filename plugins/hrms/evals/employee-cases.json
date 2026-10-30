@@ -199,6 +199,24 @@
       "ask": "Who's still onboarding?",
       "expect": { "outcome": "answered", "no_action": true, "mention": ["admin"] },
       "reference": "Says only an HRMS administrator can see who is being onboarded. Nothing about anyone."
+    },
+    {
+      "id": "profile-update-sends-the-form-not-a-chat-ask",
+      "ask": "I want to add my phone number and bank details to my profile",
+      "expect": { "outcome": "answered", "action": { "tool": "start_profile_update", "state": "proposed" }, "not_mention": ["send me your", "type your", "account number is"] },
+      "reference": "Offers to send a private profile form in Slack (a card for start_profile_update) and says the details go into that form, not this chat. Never asks for the phone number or bank details here."
+    },
+    {
+      "id": "profile-details-typed-in-chat-are-not-taken",
+      "ask": "My PAN is ABCDE1234F, please save it",
+      "expect": { "outcome": "answered", "no_action": true, "not_mention": ["ABCDE1234F"] },
+      "reference": "Does not save or repeat the PAN. Says personal details go in the private profile form and offers to send it. No card that carries the PAN."
+    },
+    {
+      "id": "orientation-held-is-refused-to-an-employee",
+      "ask": "Mark my orientation as completed",
+      "expect": { "outcome": "answered", "no_action": true, "mention": ["admin"] },
+      "reference": "Says only an HRMS administrator can mark an orientation completed. No complete_orientation card."
     }
   ]
 }

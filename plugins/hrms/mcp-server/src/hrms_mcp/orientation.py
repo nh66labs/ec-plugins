@@ -2,9 +2,10 @@
 
 The employee proposes their times with the date and time pickers the HR bot
 sends them (not through a tool); every HR admin is told in a direct message and
-answers in the same chat. These two tools are that answer: see what is waiting,
-then confirm one time with a place. Confirming completes the onboarding step and
-the employee is sent the date, time and place.
+answers in the same chat. These tools are that answer: see what is waiting,
+confirm one time with a place (which schedules it, and the employee is sent the
+date, time and place), and, once the orientation has been held, mark it
+completed — the last step: an onboarding is complete only after that.
 
 HRMS admins only: anyone else is told so as an answer, which the reply can cite.
 The place is never guessed. These tools' descriptions carry how the conversation
@@ -67,7 +68,8 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         employee: str, date: str, time: str, place: str, ctx: Context
     ) -> str:
         """Confirm a new employee's HR orientation for a date, time and place.
-        HR confirms it first. It completes that onboarding step.
+        HR confirms it first. It schedules the orientation; it does not complete
+        the onboarding.
 
         HRMS admins only. When HR says, in the same chat as the orientation
         message, "Confirm Ethan's orientation for Tuesday 11am in Room 2":
@@ -83,7 +85,9 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         5. Propose this once; its card is HR's confirmation — never ask "shall I
            go ahead?" yourself. A refusal: say what it said and do not retry.
         6. Afterwards, say who it is for, when and where, and that the "HR
-           orientation scheduled" step is complete. Then say whether the employee
+           orientation scheduled" step is complete — the onboarding finishes
+           only after the orientation is held, when HR marks it completed (say
+           so). Then say whether the employee
            was told, from employee_told: "sent" — they have the date, time and
            place; anything else ("failed", "skipped", "not_sent") — they were NOT
            reached, so HR should let them know. Never say they were told unless
@@ -109,3 +113,35 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         if not isinstance(result, dict) or not result.get("when"):
             raise ToolError("The HRMS did not confirm the orientation. Check the Onboarding card.")
         return as_json(result)
+
+    @server.tool(annotations=FILES, structured_output=False)
+    async def complete_orientation(employee: str, ctx: Context) -> str:
+        """Mark a new employee's HR orientation as held: the last step of their
+        onboarding, which is complete only after it. HR confirms it first.
+
+        HRMS admins only. Use it when HR says the orientation HAS happened —
+        "Mark Ethan's orientation as completed", "Ethan's orientation is done".
+        1. employee is the name HR used, or their email or code. When the tool
+           says the words fit several people, ask which.
+        2. Never offer it, and never call it, before HR says the orientation has
+           been held: confirming a time only schedules it. If HR asks right after
+           confirming a time, say it is for after the orientation.
+        3. Its card is HR's confirmation — never ask "shall I go ahead?"
+           yourself. A refusal (for example, no time has been confirmed yet): say
+           what it said and do not retry.
+        4. Afterwards, say who it is for, and from onboarding_complete whether
+           their onboarding is now complete (true) or what progress it is at.
+        Safe to repeat.
+        """
+        try:
+            result = await ask_admin(
+                hrms, ctx, "complete_orientation", {"employee": employee.strip()}
+            )
+        except NotAdmin:
+            raise ToolError(NOT_HR_ADMIN) from None
+        if not isinstance(result, dict) or result.get("orientation") != "completed":
+            raise ToolError(
+                "The HRMS did not mark the orientation completed. Check the Onboarding card."
+            )
+        shown = ("employee", "orientation", "onboarding_complete", "progress")
+        return as_json({k: result[k] for k in shown if k in result})
