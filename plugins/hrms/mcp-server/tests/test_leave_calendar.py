@@ -83,9 +83,11 @@ def test_an_hrms_admin_sees_everyones_leave_day_by_day(client, hrms) -> None:  #
         "2026-10-07": {"type": "Casual leave", "portion": 1.0},
         "2026-10-14": {"type": "Sick leave", "portion": 0.5},
     }
-    # 30 Sep is September's; 2 Oct is a holiday, not leave; a pending request isn't leave.
+    # 30 Sep is September's; 2 Oct is a holiday, not leave; a pending request is
+    # applied, so it counts (0.25.0).
     assert data["people"]["ravi.k@acme.test"]["days"] == {
         "2026-10-01": {"type": "Casual leave", "portion": 1.0},
+        "2026-10-21": {"type": "Casual leave", "portion": 1.0},
     }
     assert text(result) == (
         "Leave for October 2026: 2 of 2 people found in the HRMS, 2 visible to you; "

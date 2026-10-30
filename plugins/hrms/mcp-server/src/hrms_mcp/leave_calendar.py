@@ -16,10 +16,13 @@ with the verified identity, so it can't say whom a manager manages; and its team
 leave lists only people who took leave, so someone with none would look the same
 as someone outside the team (measured against the live HRMS, 2026-10-28).
 
-Leave is the HRMS's approved team leave (``get_team_leaves``, which answers HR
-with everyone's), counted into days by the same rules as the leave trend
-(``trend.days_of``), so the two never disagree about what a day of leave is.
-Holidays say whether they are public or optional.
+Leave is the HRMS's **approved or pending** team leave (``get_team_leaves``, which
+answers HR with everyone's), counted into days by the same rules as the leave
+trend (``trend.days_of``), so the two never disagree about what a day of leave
+is. The client timesheet uses it to check that leave its employees asked for in
+the client's own leave channel is also on the HRMS, where a request still
+waiting for a decision counts as applied (0.26.0). Holidays say whether they
+are public or optional.
 """
 
 from __future__ import annotations
@@ -38,6 +41,9 @@ from hrms_mcp.hrms import Hrms, HrmsError
 from hrms_mcp.tools import _ask, _identity, kind_of
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False)
+
+#: The statuses that count as applied: a decision is not waited for.
+COUNTED = ("Approved", "Pending")
 
 #: A roster is tens of people; a list far longer than this is not one.
 MOST_PEOPLE = 200
@@ -89,9 +95,9 @@ async def _person(hrms: Hrms, ctx: Context, email: str) -> dict[str, Any] | None
 def register(server: MCPServer, hrms: Hrms) -> None:
     @server.tool(annotations=READ_ONLY)
     async def get_leave_calendar(month: str, emails: list[str], ctx: Context) -> CallToolResult:
-        """One month's approved leave, day by day, and the company's holidays, for
-        the employees named by work email. For the platform's client timesheet: it
-        reads the structured result, not the words. month is 2026-10. Only an HRMS
+        """One month's approved or pending leave, day by day, and the company's
+        holidays, for the employees named by work email. For the platform's client
+        timesheet: it reads the structured result, not the words. month is 2026-10. Only an HRMS
         administrator sees anyone's leave; for anyone else every person is "not
         visible", never "no leave"."""
         first, last = month_of(month)
@@ -125,16 +131,26 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         by_employee: dict[str, dict[date, tuple[str, float]]] = {}
         if visible:
             try:
-                records = await hrms.call(
-                    "get_team_leaves", {"status": "Approved"}, _identity(ctx)
-                )
+                # Approved and pending, one read each: a request still waiting
+                # for a decision is applied. One leave read twice is counted
+                # once, by its id.
+                records = []
+                for status in COUNTED:
+                    records += await hrms.call(
+                        "get_team_leaves", {"status": status}, _identity(ctx)
+                    ) or []
             except HrmsError as error:
                 if "access denied" not in str(error).lower():
                     raise ToolError(str(error)) from None
                 records, visible = [], set()
-            for record in records or []:
-                if not isinstance(record, dict) or str(record.get("status")) != "Approved":
+            counted: set[str] = set()
+            for record in records:
+                if not isinstance(record, dict) or str(record.get("status")) not in COUNTED:
                     continue
+                key = str(record.get("leave_id") or id(record))
+                if key in counted:
+                    continue
+                counted.add(key)
                 leave = _leave(record)
                 if leave is None or not trend.overlaps(leave, first, last):
                     continue
