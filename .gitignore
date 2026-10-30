@@ -1,0 +1,6 @@
+# Build output of `pip install .`; never part of a plugin.
+build/
+*.egg-info/
+__pycache__/
+.pytest_cache/
+.ruff_cache/

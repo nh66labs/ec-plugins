@@ -398,6 +398,66 @@ def test_the_hrms_refusing_a_delete_is_said_plainly(client, mbo_hrms) -> None:  
     assert result["isError"] and "only a Draft plan can be changed" in text(result)
 
 
+# --- the clear ------------------------------------------------------------------------
+
+EMPTY = {**PLAN, "total_weightage": 0, "mbos": []}
+ALL_GONE = {"fiscal_year": "2026-27", "quarter": 3, "mbo_count": 2}
+
+
+def test_the_clear_is_listed_as_a_write_that_says_how_many(client) -> None:  # noqa: F811
+    tools = {t["name"]: t for t in rpc(client, "tools/list").json()["result"]["tools"]}
+    clear = tools["clear_my_mbo_plan"]
+    assert clear["annotations"]["readOnlyHint"] is False
+    assert clear["annotations"]["destructiveHint"] is True
+    # The card shows how many goals go, so one confirm reads as what it does.
+    assert set(clear["inputSchema"]["required"]) == {"fiscal_year", "quarter", "mbo_count"}
+
+
+def test_a_clear_deletes_every_goal_in_one_call(client, mbo_hrms) -> None:  # noqa: F811
+    answers = iter([PLAN, EMPTY])
+    mbo_hrms.results["get_my_mbo_plan"] = lambda _arguments: next(answers)
+    mbo_hrms.results["clear_my_mbo_plan"] = EMPTY
+    said = text(call(client, "clear_my_mbo_plan", ALL_GONE))
+    assert "Deleted all 2 MBOs: Ship v2; Cut P1 bugs." in said
+    assert "No MBOs on it yet." in said and "kept, empty" in said
+    sent = mbo_hrms.calls()[-1]
+    assert sent["name"] == "clear_my_mbo_plan"
+    assert sent["arguments"] == {"fiscal_year": "2026-27", "quarter": 3, "mbo_count": 2}
+
+
+def test_clearing_an_empty_plan_changes_nothing(client, mbo_hrms) -> None:  # noqa: F811
+    mbo_hrms.results["get_my_mbo_plan"] = EMPTY
+    said = text(call(client, "clear_my_mbo_plan", ALL_GONE))
+    assert "Nothing changed" in said
+    assert all(c["name"] != "clear_my_mbo_plan" for c in mbo_hrms.calls())
+
+
+@pytest.mark.parametrize(
+    ("change", "says"),
+    [
+        ({"mbo_count": 3}, "has 2 MBO(s) now, not 3"),
+        ({"mbo_count": 0}, "at least 1"),
+        ({"quarter": 5}, "quarter must be 1-4"),
+    ],
+)
+def test_a_clear_that_does_not_match_the_plan_is_refused_before_the_hrms(
+    client, mbo_hrms, change: dict, says: str,  # noqa: F811
+) -> None:
+    mbo_hrms.results["get_my_mbo_plan"] = PLAN
+    result = call(client, "clear_my_mbo_plan", {**ALL_GONE, **change})
+    assert result["isError"] and says in text(result)
+    assert all(c["name"] != "clear_my_mbo_plan" for c in mbo_hrms.calls())
+
+
+def test_the_hrms_refusing_a_clear_is_said_plainly(client, mbo_hrms) -> None:  # noqa: F811
+    mbo_hrms.results["get_my_mbo_plan"] = PLAN
+    mbo_hrms.errors["clear_my_mbo_plan"] = (
+        "cannot delete: the Q3 2026-27 plan is Submitted; only a Draft plan can be changed"
+    )
+    result = call(client, "clear_my_mbo_plan", ALL_GONE)
+    assert result["isError"] and "only a Draft plan can be changed" in text(result)
+
+
 def test_the_mbos_never_reach_the_log(client, mbo_hrms, caplog) -> None:  # noqa: F811
     caplog.set_level("DEBUG")
     call(client, "save_my_mbo_plan", AGREED)
