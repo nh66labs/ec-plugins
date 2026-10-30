@@ -14,12 +14,14 @@
 #   0.3.0    the ticket lists' settings: No Epics, No Estimates, Abandoned
 #   0.4.0    the HRMS server's leave calendar: leave codes and public holidays
 #   0.5.0    always mention: who is mentioned on every post in the client's Slack
+#   0.6.0    client holidays and leave channel: the client's own holidays, and its
+#            leave channel as the source of leave; the HRMS only checks it
 #   step 7   the three monthly schedules, set by the HR admin on the agent's
 #            Schedule tab (a manifest carries no schedule)
 manifest_version: 2
 plugin_id: client-timesheet
 name: Client timesheet
-version: 0.5.0
+version: 0.6.0
 description: Keeps the monthly timesheet a client asks for, for the company's employees placed there - who is who at the client, each person's hours from the client's Jira, and the tickets missing an epic, an estimate or a reason.
 
 connectors:
@@ -29,8 +31,11 @@ tools:
   - builtin:create_timesheet
 
 # The HRMS plugin's own server, named here too: Connect adopts it when it is
-# already registered, and approves only the read the timesheet needs. It answers
-# as whoever the run acts as, so the HRMS decides whose leave they may see.
+# already registered, and approves only the read the timesheet needs. The client's
+# leave channel decides what is leave; the HRMS is only checked against it, so the
+# leave read answers as whoever the run acts as and the HRMS decides whose leave
+# they may see (an HRMS administrator's build can check; any other's reads leave
+# from the channel and skips the check).
 mcp_servers:
   - server_id: hrms
     name: HRMS
@@ -63,7 +68,9 @@ agents:
         epic not needed for projects  = PS, ESM          (listed, with that reason)
         epic not needed for summaries = [PROD], [UAT]    (listed, with that reason)
         abandoned            = Abandoned  (the statuses that mean a ticket was dropped)
-        leave codes          = Casual leave V, Sick leave S, Floating leave V   (each HRMS leave type's code)
+        client holidays      = 2026-10-02, 2026-10-20, 2026-11-08, 2026-11-09, 2026-11-10, 2026-12-25   (the client's public holidays: the only ones counted)
+        leave channel        = out-of-the-office   (the client's public leave channel: its requests are the leave)
+        leave codes          = Casual leave V, Sick leave S, Floating leave V   (the HRMS's type for a day, shown as its code; V when the HRMS has no entry)
         always mention       = manjusha.m-issac@kulu.com, vandana.girishkumar@kulu.com   (mentioned on every post in the client's Slack)
 
       **The platform builds the timesheet.** It reads the roster and the
