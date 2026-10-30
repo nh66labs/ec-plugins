@@ -48,3 +48,9 @@ class Settings(BaseSettings):
     #: the default title (``mbo.DEFAULT_ACCEPTANCE_GUIDE``, ``DEFAULT_ROLE_GUIDE``).
     mbo_acceptance_guide: str = ""
     mbo_role_guide: str = ""
+
+    #: The HR-Assist dashboard's address as people open it in a browser (not the
+    #: API's), e.g. ``https://hr.example.com``. Where the assistant sends people
+    #: to upload their documents, which are never taken in a chat. Blank means
+    #: the answer names the page without a link.
+    hr_assist_dashboard_url: str = ""
