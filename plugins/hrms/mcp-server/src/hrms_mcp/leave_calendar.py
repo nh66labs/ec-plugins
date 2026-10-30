@@ -21,7 +21,7 @@ answers HR with everyone's), counted into days by the same rules as the leave
 trend (``trend.days_of``), so the two never disagree about what a day of leave
 is. The client timesheet uses it to check that leave its employees asked for in
 the client's own leave channel is also on the HRMS, where a request still
-waiting for a decision counts as applied (0.25.0). Holidays say whether they
+waiting for a decision counts as applied (0.26.0). Holidays say whether they
 are public or optional.
 """
 

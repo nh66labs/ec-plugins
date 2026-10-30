@@ -49,7 +49,7 @@ mcp_servers:
     name: HRMS MCP server
     summary: Leave, work-from-home, comp-off, MBO and onboarding tools in front of the HRMS — read, file, decide, set MBOs and create new employees — acting as the person asking; and a month's leave calendar for the client timesheet.
     source: plugins/hrms/mcp-server
-    image: ghcr.io/nh66labs/ec-hrms-mcp:0.25.0
+    image: ghcr.io/nh66labs/ec-hrms-mcp:0.26.0
 
 connectors:
   - connector_id: apollo
