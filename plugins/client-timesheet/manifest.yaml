@@ -16,12 +16,20 @@
 #   0.5.0    always mention: who is mentioned on every post in the client's Slack
 #   0.6.0    client holidays and leave channel: the client's own holidays, and its
 #            leave channel as the source of leave; the HRMS only checks it
+#   0.7.0    timezone Asia/Dubai, not Asia/Kolkata: a day is counted in the
+#            timezone the people's Jira profile (and so Clockwork) shows
+#   0.8.0    epic not needed when related to: a ticket that Relates to a PS
+#            ticket is left off No Epics; a classic Epic Link counts as an epic
+#   0.9.0    leave sheet, leave sheet tab, leave sheet names: the client's
+#            leave sheet says whether a leave is a half day and of what type
+#   0.10.0   leave codes names Compensatory off CO: the HRMS server (0.28.0)
+#            counts a comp-off's day off as leave
 #   step 7   the three monthly schedules, set by the HR admin on the agent's
 #            Schedule tab (a manifest carries no schedule)
 manifest_version: 2
 plugin_id: client-timesheet
 name: Client timesheet
-version: 0.6.0
+version: 0.10.0
 description: Keeps the monthly timesheet a client asks for, for the company's employees placed there - who is who at the client, each person's hours from the client's Jira, and the tickets missing an epic, an estimate or a reason.
 
 connectors:
@@ -61,16 +69,20 @@ agents:
 
         client               = Kulu      (whose timesheet it is: the title and the file's name)
         vendor               = Hamon     (the Vendor column: what the client calls us)
-        timezone             = Asia/Kolkata   (the day each worklog counts on)
+        timezone             = Asia/Dubai   (the day each worklog counts on: the people's own Jira timezone, which Clockwork shows)
         most hours in a day  = 8         (above it, a day is an autolog to correct)
         projects             = CPP, IN, WP, PS, ESM, MT   (where No Epics and Abandoned look)
         estimates needed in  = CPP, IN, ESM, IAM, PLT, MT  (where No Estimates looks)
-        epic not needed for projects  = PS, ESM          (listed, with that reason)
-        epic not needed for summaries = [PROD], [UAT]    (listed, with that reason)
+        epic not needed for projects  = PS, ESM          (left off No Epics)
+        epic not needed for summaries = [PROD], [UAT]    (left off No Epics)
+        epic not needed when related to = PS    (a ticket that Relates to one of these projects is left off No Epics)
         abandoned            = Abandoned  (the statuses that mean a ticket was dropped)
         client holidays      = 2026-10-02, 2026-10-20, 2026-11-08, 2026-11-09, 2026-11-10, 2026-12-25   (the client's public holidays: the only ones counted)
         leave channel        = out-of-the-office   (the client's public leave channel: its requests are the leave)
-        leave codes          = Casual leave V, Sick leave S, Floating leave V   (the HRMS's type for a day, shown as its code; V when the HRMS has no entry)
+        leave sheet          = <the workbook's link>   (the Google Sheet the workflow writes each request to: it says half or full day and the type)
+        leave sheet tab      = Leave Requests
+        leave sheet names    = Harish Thampy: harish, Manjusha M Isac: manjusha m issac, Rohith Sakthivel: rohith shakthivel, joprin joy: joprin, muhammed shamil: shamil   (only where the sheet writes a name differently)
+        leave codes          = Casual leave V, Sick leave S, Floating leave V, Compensatory off CO   (the leave type of a day, shown as its code; V when nothing names it)
         always mention       = manjusha.m-issac@kulu.com, vandana.girishkumar@kulu.com   (mentioned on every post in the client's Slack)
 
       **The platform builds the timesheet.** It reads the roster and the
