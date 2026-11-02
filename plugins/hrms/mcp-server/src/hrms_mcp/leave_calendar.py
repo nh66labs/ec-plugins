@@ -168,6 +168,7 @@ def register(server: MCPServer, hrms: Hrms) -> None:
                         _, before = days.get(day, ("", 0.0))
                         days[day] = (leave.kind, min(1.0, before + portion))
 
+        comp_said = ""
         if visible:
             # A comp-off is a day off too, and the HRMS does not call it leave: left
             # out, an employee who took one would be asked to apply for leave they
@@ -183,6 +184,7 @@ def register(server: MCPServer, hrms: Hrms) -> None:
             except HrmsError as error:
                 raise ToolError(f"The HRMS would not list comp-offs: {error}") from None
             seen_off: set[str] = set()
+            in_month = elsewhere = 0
             for record in comp_offs:
                 if not isinstance(record, dict) or str(record.get("status")) not in COUNTED:
                     continue
@@ -195,9 +197,18 @@ def register(server: MCPServer, hrms: Hrms) -> None:
                 except ValueError:
                     continue  # asked for, not yet given a day off
                 if first <= off <= last and trend.is_working(off, off_days):
-                    by_employee.setdefault(str(record.get("employee_id") or ""), {}).setdefault(
-                        off, (COMP_OFF, 1.0)
-                    )
+                    who = str(record.get("employee_id") or "")
+                    in_month += 1
+                    elsewhere += who not in found.values()
+                    by_employee.setdefault(who, {}).setdefault(off, (COMP_OFF, 1.0))
+            # Said in the answer, so a record shaped otherwise than expected shows: with
+            # no employee on it, every comp-off lands under nobody and flags the person.
+            comp_said = (
+                f" Comp-offs: {len(seen_off)} listed, {in_month} on a working day of the month"
+                f", {elsewhere} of them not for anyone asked about."
+            )
+            if comp_offs and isinstance(comp_offs[0], dict):
+                comp_said += f" Fields: {', '.join(sorted(comp_offs[0]))}."
 
         result: dict[str, Any] = {}
         for email in wanted:
@@ -216,6 +227,7 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         said = (
             f"Leave for {first:%B %Y}: {len(found)} of {len(wanted)} people found in the HRMS, "
             f"{len(visible)} visible to you; {public} public holiday{'s' * (public != 1)}."
+            + comp_said
         )
         return CallToolResult(
             content=[TextContent(type="text", text=said)],
