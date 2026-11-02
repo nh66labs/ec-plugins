@@ -16,6 +16,9 @@ with the verified identity, so it can't say whom a manager manages; and its team
 leave lists only people who took leave, so someone with none would look the same
 as someone outside the team (measured against the live HRMS, 2026-10-28).
 
+A comp-off's day off counts as leave too, as "Compensatory off" (0.28.0): the HRMS
+keeps comp-offs apart from leave, so ``get_all_comp_off`` is read as well.
+
 Leave is the HRMS's **approved or pending** team leave (``get_team_leaves``, which
 answers HR with everyone's), counted into days by the same rules as the leave
 trend (``trend.days_of``), so the two never disagree about what a day of leave
@@ -44,6 +47,11 @@ READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldH
 
 #: The statuses that count as applied: a decision is not waited for.
 COUNTED = ("Approved", "Pending")
+
+#: How a comp-off's day off is named: the HRMS keeps a comp-off as its own request
+#: (a day worked, and the day off in return), not as leave, so it is not in the team
+#: leave list and is read from the comp-off list instead (0.28.0).
+COMP_OFF = "Compensatory off"
 
 #: A roster is tens of people; a list far longer than this is not one.
 MOST_PEOPLE = 200
@@ -159,6 +167,37 @@ def register(server: MCPServer, hrms: Hrms) -> None:
                     if first <= day <= last:
                         _, before = days.get(day, ("", 0.0))
                         days[day] = (leave.kind, min(1.0, before + portion))
+
+        if visible:
+            # A comp-off is a day off too, and the HRMS does not call it leave: left
+            # out, an employee who took one would be asked to apply for leave they
+            # have no need of. Approved and pending, as leave is; a leave on the same
+            # day keeps its own type. A failure here is the whole answer failing,
+            # since an empty list would read as "no comp-offs" and flag people.
+            try:
+                comp_offs = []
+                for status in COUNTED:
+                    comp_offs += await hrms.call(
+                        "get_all_comp_off", {"status": status}, _identity(ctx)
+                    ) or []
+            except HrmsError as error:
+                raise ToolError(f"The HRMS would not list comp-offs: {error}") from None
+            seen_off: set[str] = set()
+            for record in comp_offs:
+                if not isinstance(record, dict) or str(record.get("status")) not in COUNTED:
+                    continue
+                key = str(record.get("id") or record.get("comp_off_id") or id(record))
+                if key in seen_off:
+                    continue
+                seen_off.add(key)
+                try:
+                    off = date.fromisoformat(str(record.get("off_date") or "")[:10])
+                except ValueError:
+                    continue  # asked for, not yet given a day off
+                if first <= off <= last and trend.is_working(off, off_days):
+                    by_employee.setdefault(str(record.get("employee_id") or ""), {}).setdefault(
+                        off, (COMP_OFF, 1.0)
+                    )
 
         result: dict[str, Any] = {}
         for email in wanted:

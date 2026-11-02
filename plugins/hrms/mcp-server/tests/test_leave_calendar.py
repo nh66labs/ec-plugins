@@ -58,6 +58,8 @@ def _hrms_for(fake: FakeHrms, role: str, manages: tuple[str, ...] = ()) -> None:
         _leave("emp-9", "2026-09-30", "2026-10-02"),
         _leave("emp-9", "2026-10-21", status="Pending"),
     ]
+    # The HRMS keeps a comp-off apart from leave: none, unless a test adds some.
+    fake.results["get_all_comp_off"] = []
 
 
 def _calendar(server: TestClient, emails: list[str], month: str = "2026-10") -> dict[str, Any]:
@@ -125,3 +127,48 @@ def test_the_calendar_is_read_only(client) -> None:  # noqa: F811
     tool = tools["get_leave_calendar"]
     assert tool["annotations"]["readOnlyHint"] is True
     assert set(tool["inputSchema"]["properties"]) == {"month", "emails"}
+
+
+def _comp_off(employee: str, off_date: str, status: str = "Approved", ident: str = "") -> dict:
+    return {"id": ident or f"co-{employee}-{off_date}", "employee_id": employee,
+            "work_date": "2026-10-03", "off_date": off_date, "status": status, "reason": "release"}
+
+
+def test_a_comp_offs_day_off_counts_as_a_day_of_leave(client, hrms) -> None:  # noqa: F811
+    """The HRMS calls a comp-off something other than leave, so it is not in the team
+    leave list; left out, someone who took one is asked to apply for leave."""
+    _hrms_for(hrms, "admin")
+    hrms.results["get_all_comp_off"] = [
+        _comp_off("emp-7", "2026-10-26"),
+        _comp_off("emp-7", "2026-10-27", status="Pending"),
+        _comp_off("emp-7", "2026-10-28", status="Rejected"),     # did not stand
+        _comp_off("emp-7", "2026-10-25"),                         # a Sunday: no day off
+        _comp_off("emp-7", "2026-10-02"),                         # a public holiday
+        _comp_off("emp-7", "2026-11-02"),                         # next month
+        _comp_off("emp-7", "2026-10-14"),                         # a leave day already
+        _comp_off("emp-7", "2026-10-29", ident="co-dup"),
+        _comp_off("emp-7", "2026-10-29", ident="co-dup"),         # listed twice
+        {"id": "co-none", "employee_id": "emp-7", "off_date": None, "status": "Approved"},
+    ]
+    people = _calendar(client, ["anu@acme.test"])["structuredContent"]["people"]
+    days = people["anu@acme.test"]["days"]
+    assert days["2026-10-26"] == {"type": "Compensatory off", "portion": 1.0}
+    assert days["2026-10-27"] == {"type": "Compensatory off", "portion": 1.0}
+    assert days["2026-10-29"] == {"type": "Compensatory off", "portion": 1.0}
+    assert days["2026-10-14"] == {"type": "Sick leave", "portion": 0.5}, "leave keeps its own"
+    for day in ("2026-10-28", "2026-10-25", "2026-10-02", "2026-11-02"):
+        assert day not in days, day
+
+
+def test_comp_offs_are_read_for_an_admin_only_and_failing_to_read_them_fails_the_read(
+    client, hrms  # noqa: F811
+) -> None:
+    _hrms_for(hrms, "employee", manages=("emp-7",))
+    _calendar(client, ["anu@acme.test"])
+    assert "get_all_comp_off" not in {c["name"] for c in hrms.calls()}
+
+    _hrms_for(hrms, "admin")
+    hrms.errors["get_all_comp_off"] = "the HRMS is down"
+    result = call(client, "get_leave_calendar", {"month": "2026-10", "emails": ["anu@acme.test"]})
+    # Not an empty list: that would read as "no comp-offs" and ask people to apply for leave.
+    assert result.get("isError") and "would not list comp-offs" in text(result)

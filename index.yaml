@@ -33,7 +33,7 @@ plugins:
   - plugin_id: client-timesheet
     name: Client timesheet
     summary: Keeps the monthly timesheet a client asks for, for the company's employees placed there - who is who at the client, each person's hours from the client's Jira, and the tickets missing an epic, an estimate or a reason.
-    version: 0.6.0
+    version: 0.10.0
     manifest: plugins/client-timesheet/manifest.yaml
     requires:
       connectors: [jira]
@@ -49,7 +49,7 @@ mcp_servers:
     name: HRMS MCP server
     summary: Leave, work-from-home, comp-off, MBO and onboarding tools in front of the HRMS — read, file, decide, set MBOs and create new employees — acting as the person asking; and a month's leave calendar for the client timesheet.
     source: plugins/hrms/mcp-server
-    image: ghcr.io/nh66labs/ec-hrms-mcp:0.27.0
+    image: ghcr.io/nh66labs/ec-hrms-mcp:0.28.0
 
 connectors:
   - connector_id: apollo
