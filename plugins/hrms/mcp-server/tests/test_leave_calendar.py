@@ -93,7 +93,8 @@ def test_an_hrms_admin_sees_everyones_leave_day_by_day(client, hrms) -> None:  #
     }
     assert text(result) == (
         "Leave for October 2026: 2 of 2 people found in the HRMS, 2 visible to you; "
-        "1 public holiday."
+        "1 public holiday. Comp-offs: 0 listed, 0 on a working day of the month, "
+        "0 of them not for anyone asked about."
     )
 
 
@@ -172,3 +173,16 @@ def test_comp_offs_are_read_for_an_admin_only_and_failing_to_read_them_fails_the
     result = call(client, "get_leave_calendar", {"month": "2026-10", "emails": ["anu@acme.test"]})
     # Not an empty list: that would read as "no comp-offs" and ask people to apply for leave.
     assert result.get("isError") and "would not list comp-offs" in text(result)
+
+
+def test_the_answer_says_what_the_comp_off_list_held(client, hrms) -> None:  # noqa: F811
+    """A comp-off record shaped otherwise than expected must show, not vanish."""
+    _hrms_for(hrms, "admin")
+    hrms.results["get_all_comp_off"] = [
+        _comp_off("emp-7", "2026-10-26"),
+        _comp_off("emp-99", "2026-10-27"),
+    ]
+    asked = {"month": "2026-10", "emails": ["anu@acme.test"]}
+    said = text(call(client, "get_leave_calendar", asked))
+    assert "Comp-offs: 2 listed, 2 on a working day of the month, 1 of them not for anyone" in said
+    assert "Fields: employee_id, id, off_date, reason, status, work_date." in said
