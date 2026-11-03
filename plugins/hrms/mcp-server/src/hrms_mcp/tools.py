@@ -25,7 +25,7 @@ from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
-from hrms_mcp import trend, workload
+from hrms_mcp import approver_choice, trend, workload
 from hrms_mcp.hrms import Hrms, HrmsError
 from hrms_mcp.jira_work import JiraReader, JiraWork
 
@@ -522,6 +522,8 @@ def register(server: MCPServer, hrms: Hrms, jira: JiraReader | None = None) -> N
         # Accepted and ignored, so a card saved before every project manager
         # approved still validates: the HRMS sends the request to them all.
         approver: str = "",
+        # The project managers the person chose, where a project lets them.
+        approvers: str = "",
     ) -> str:
         """Check a leave request before filing it, creating nothing: how many days
         it counts as, clashes with meetings or teammates' leave, the balance
@@ -565,7 +567,7 @@ def register(server: MCPServer, hrms: Hrms, jira: JiraReader | None = None) -> N
             jira_sentences(hrms, jira, ctx, off, date_from, until)
         )
         try:
-            approvers = await _approvers(hrms, ctx)
+            who = await _approvers(hrms, ctx, approvers)
         except BaseException:
             reading.cancel()
             raise
@@ -592,7 +594,7 @@ def register(server: MCPServer, hrms: Hrms, jira: JiraReader | None = None) -> N
             # or when it says more — that the excess is unpaid, say.
             if not (balance and _plain_balance(line))
         ))
-        sections.append(f"{approvers}\nNothing is filed until you confirm.")
+        sections.append(f"{who}\nNothing is filed until you confirm.")
         return "\n\n".join(s for s in sections if s)
 
     @server.tool(annotations=READ_ONLY, structured_output=False)
@@ -1093,8 +1095,20 @@ async def _holidays_ahead(hrms: Hrms, ctx: Context, today: str, days: int = 31) 
     return "Holidays in the next month: " + ("; ".join(found) if found else "none") + "."
 
 
-async def _approvers(hrms: Hrms, ctx: Context) -> str:
-    """Who approves the asker's leave, said to the asker before it is filed."""
+async def _approvers(hrms: Hrms, ctx: Context, picked: str | None = None) -> str:
+    """Who approves the asker's leave, said to the asker before it is filed.
+
+    ``picked`` is the managers the person chose for this request (as the form
+    sends them, "" for none); None when no request is in hand, and the answer
+    says how things stand. Where a project lets the person choose, a request
+    that has no pick is refused here, before it is shown to be confirmed."""
+    options = await approver_choice.read_options(hrms, ctx)
+    if approver_choice.choosing(options):
+        if picked is None:
+            return approver_choice.context_sentence(options)
+        return approver_choice.sentence(
+            options, approver_choice.picks_for(options, picked), filed=False
+        )
     result = await _ask(hrms, ctx, "get_employee_project_managers", {})
     return approvers_sentence((result or {}).get("project_managers", []), filed=False)
 

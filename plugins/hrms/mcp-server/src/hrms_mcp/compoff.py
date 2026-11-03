@@ -29,6 +29,7 @@ from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
+from hrms_mcp import approver_choice
 from hrms_mcp.hrms import Hrms
 from hrms_mcp.tools import _ask, _today, approvers_sentence, date_in, day_of, warning_of
 from hrms_mcp.writes import FILES, UNDOES, _waiting_for, one_to_cancel
@@ -109,9 +110,15 @@ def _already_off(day: date, holidays: dict[str, dict[str, Any]]) -> str:
     return "a weekend" if day.weekday() >= 5 else ""
 
 
-async def _who_approves(hrms: Hrms, ctx: Context) -> str:
+async def _who_approves(hrms: Hrms, ctx: Context, picked: str = "") -> str:
     """Who must approve, said before it is filed — or "" when the HRMS cannot
-    say, in whatever shape: the check goes on without it."""
+    say, in whatever shape: the check goes on without it. Where a project lets
+    the person choose, a request with no pick is refused here."""
+    options = await approver_choice.read_options(hrms, ctx)
+    if approver_choice.choosing(options):
+        return approver_choice.sentence(
+            options, approver_choice.picks_for(options, picked), filed=False
+        )
     try:
         result = await _ask(hrms, ctx, "get_employee_project_managers", {})
     except ToolError:
@@ -220,6 +227,9 @@ def register(server: MCPServer, hrms: Hrms) -> None:
             known["reason"] = reason.strip()
         else:
             questions.append({"name": "reason", "label": "Reason", "kind": "text"})
+        # Last, and only where a project lets the person choose who approves.
+        if ask := approver_choice.question(await approver_choice.read_options(hrms, ctx)):
+            questions.append(ask)
 
         if "work_date" in known:
             prompt = comp_off_line(known["work_date"], known.get("off_date", ""))
@@ -267,6 +277,8 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         ctx: Context,
         off_date: str = "",
         reason: str = "",
+        # The project managers the person chose, where a project lets them.
+        approvers: str = "",
     ) -> str:
         """Check a comp-off request before filing it, creating nothing: whether
         the day worked is a holiday or a weekend, whether the day off is already
@@ -278,9 +290,9 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         # only. Each only adds a warning or a name, so one that fails is left out
         # rather than stopping the request: apply_comp_off still looks for one
         # already filed before it files.
-        holidays, approvers, history, today = await asyncio.gather(
+        holidays, who, history, today = await asyncio.gather(
             _or_none(_holidays(hrms, ctx, *(d for d in (worked, off) if d))),
-            _who_approves(hrms, ctx),
+            _who_approves(hrms, ctx, approvers),
             _or_none(_ask(hrms, ctx, "get_comp_off_history", {})),
             _today_of(hrms, ctx),
         )
@@ -322,7 +334,7 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         sections = [
             warning_of(warnings),
             head,
-            f"{approvers or 'Your project managers will approve it.'}\n"
+            f"{who or 'Your project managers will approve it.'}\n"
             "Nothing is filed until you confirm.",
         ]
         return "\n\n".join(s for s in sections if s)
@@ -333,13 +345,16 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         reason: str,
         ctx: Context,
         off_date: str = "",
+        # The project managers the person chose, where a project lets them.
+        approvers: str = "",
     ) -> str:
         """File a comp-off request for the person asking. They confirm it first.
 
         Call preview_comp_off with the same details before this. Every argument
         comes from what the person said, the form, or get_leave_context — never
         guess a day or a reason. Dates are YYYY-MM-DD; off_date may be left out.
-        It goes to their project managers.
+        It goes to their project managers: all of them, or, for a project where
+        the person chooses, the ones they chose.
         """
         if not reason.strip():
             raise ToolError("A reason is needed. Ask the person what they worked on that day.")
@@ -356,9 +371,11 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         arguments: dict[str, Any] = {"work_date": worked, "reason": reason.strip()}
         if off:
             arguments["off_date"] = off.isoformat()
+        if picks := await approver_choice.picks_from(hrms, ctx, approvers):
+            arguments["project_manager_ids"] = picks
         filed = await _ask(hrms, ctx, "apply_comp_off", arguments)
         status = str((filed.get("status") if isinstance(filed, dict) else "") or "Pending")
-        waiting = await _waiting_for(hrms, ctx) if status == "Pending" else ""
+        waiting = await _waiting_for(hrms, ctx, approvers) if status == "Pending" else ""
         return f"Filed: {what} — reason: {reason.strip()}. Status: {status}.{waiting}"
 
     @server.tool(annotations=UNDOES, structured_output=False)

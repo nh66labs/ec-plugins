@@ -6,8 +6,9 @@ This tool works out what is still missing and answers with a **form**: the
 missing things as choices the person clicks, with options from the HRMS itself
 (their leave types with what is left of each), naming ``apply_leave`` as the
 write the answers complete and ``preview_leave`` as the check to run first.
-Who approves is never a choice: the HRMS sends the request to every one of the
-person's project managers, and all of them must approve it.
+Who approves is a choice only where the person's project lets them: then the
+form asks which of its project managers the request goes to (any one may decide
+it). Otherwise the HRMS sends it to every one of their project managers.
 
 The platform renders the form, collects the answers without a model, runs the
 check, and shows the request to confirm. So a request takes one assistant turn,
@@ -33,6 +34,7 @@ from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
+from hrms_mcp import approver_choice
 from hrms_mcp.compoff import COMP_OFF
 from hrms_mcp.hrms import Hrms
 from hrms_mcp.jira_work import JiraReader
@@ -143,6 +145,10 @@ async def form_for(
         known["reason"] = reason.strip()
     else:
         questions.append({"name": "reason", "label": "Reason", "kind": "text"})
+
+    # Last, and only where a project lets the person choose who approves.
+    if ask := approver_choice.question(await approver_choice.read_options(hrms, ctx)):
+        questions.append(ask)
 
     what = kind_of(chosen_type) if chosen_type else "Leave"
     prompt = f"{what} for {when_of(date_from, date_to)}"

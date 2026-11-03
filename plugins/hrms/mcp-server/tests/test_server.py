@@ -403,8 +403,10 @@ def test_preview_files_nothing_and_says_so(client: TestClient, hrms: FakeHrms) -
     assert said.startswith("Casual leave on Thu 1 Oct 2026, full day — 1 day.")
     assert "Nothing is filed until you confirm." in said
     # Reads only: the check, its approvers, and Jira through the HRMS.
+    # get_approver_options: whether any of the asker's projects lets them choose.
     assert {c["name"] for c in hrms.calls()} == {
         "preview_leave", "get_employee_project_managers", "get_user_session", "get_jira_work",
+        "get_approver_options",
     }
     [checked] = [c for c in hrms.calls() if c["name"] == "preview_leave"]
     assert checked["arguments"] == {
@@ -2024,3 +2026,186 @@ def test_a_pending_comp_off_is_cancelled_even_with_the_day_in_the_past(
     ]
     call(client, "cancel_my_comp_off", {"work_date": "2026-10-02"})
     assert _called(hrms, "cancel_comp_off") == [{"comp_off_id": "7"}]
+
+
+# --- choosing who approves (EC-D342) ------------------------------------------------
+
+ANN, BO, CY = ("lead-ann", "Ann"), ("lead-bo", "Bo"), ("lead-cy", "Cy")
+
+
+def _projects(hrms: FakeHrms, *projects: tuple[str, str, tuple[tuple[str, str], ...]]) -> None:
+    hrms.results["get_approver_options"] = [
+        {
+            "project_id": f"p-{name}", "project_name": name, "approver_mode": mode,
+            "leads": [{"id": i, "name": n, "role": "pm"} for i, n in leads],
+        }
+        for name, mode, leads in projects
+    ]
+
+
+def test_a_choose_project_asks_who_should_approve(client: TestClient, hrms: FakeHrms) -> None:
+    _projects(hrms, ("Dyn", "choose", (ANN, BO, CY)))
+    form = _form(call(client, "start_leave_request", {"date_from": "2026-09-30"}))
+    assert [q["name"] for q in form["questions"]] == [
+        "leave_type", "day_portion", "reason", "approvers",
+    ]
+    assert form["questions"][-1] == {
+        "name": "approvers", "label": "Who should approve this?", "kind": "multichoice",
+        "options": [
+            {"value": "lead-ann", "label": "Ann"},
+            {"value": "lead-bo", "label": "Bo"},
+            {"value": "lead-cy", "label": "Cy"},
+        ],
+    }
+    # The form's other parts are as they were.
+    assert form["action"]["tool"] == "apply_leave" and form["check"] == {"tool": "preview_leave"}
+
+
+def test_a_complete_request_still_asks_who_approves_where_chosen(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    _projects(hrms, ("Dyn", "choose", (ANN, BO)))
+    form = _form(call(client, "start_leave_request", {
+        "date_from": "2026-10-01", "leave_type": "Casual Leave", "day_portion": "Full Day",
+        "reason": "family function",
+    }))
+    assert [q["name"] for q in form["questions"]] == ["approvers"]
+
+
+@pytest.mark.parametrize(
+    "projects",
+    [
+        pytest.param([], id="no-projects"),
+        pytest.param([("Fix", "fixed", (ANN, BO))], id="fixed"),
+        pytest.param([("Solo", "choose", (ANN,))], id="one-manager"),
+    ],
+)
+def test_nothing_is_asked_where_nothing_is_chosen(
+    client: TestClient, hrms: FakeHrms, projects: list
+) -> None:
+    _projects(hrms, *projects)
+    for tool, arguments in (
+        ("start_leave_request", {"date_from": "2026-09-30"}),
+        ("start_wfh_request", {"date_from": "2026-09-30"}),
+        ("start_comp_off_request", {"work_date": "2026-10-02"}),
+    ):
+        names = [q["name"] for q in _form(call(client, tool, arguments))["questions"]]
+        assert "approvers" not in names, tool
+
+
+def test_an_hrms_without_the_options_is_read_as_before(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    hrms.errors["get_approver_options"] = "unknown tool"
+    form = _form(call(client, "start_leave_request", {"date_from": "2026-09-30"}))
+    assert [q["name"] for q in form["questions"]] == ["leave_type", "day_portion", "reason"]
+    said = text(call(client, "apply_leave", APPLY))
+    assert said.startswith("Filed:")
+    [sent] = _called(hrms, "apply_leave")
+    assert "project_manager_ids" not in sent
+
+
+def test_the_picks_are_named_in_the_check_and_sent_with_the_request(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    _projects(hrms, ("Dyn", "choose", (ANN, BO, CY)))
+    picked = json.dumps(["lead-ann", "lead-cy"])
+    checked = text(call(client, "preview_leave", {
+        "leave_type": "Casual Leave", "date_from": "2026-10-01", "day_portion": "Full Day",
+        "approvers": picked,
+    }))
+    assert "It goes to Ann and Cy; any one of them can approve it." in checked
+    assert "Bo" not in checked and "all of them must approve" not in checked
+
+    said = text(call(client, "apply_leave", {**APPLY, "approvers": picked}))
+    assert "It is waiting for Ann and Cy — it is settled by whichever" in said
+    [sent] = _called(hrms, "apply_leave")
+    assert sent["project_manager_ids"] == ["lead-ann", "lead-cy"]
+
+
+def test_a_request_without_a_pick_is_not_filed_where_one_is_needed(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    _projects(hrms, ("Dyn", "choose", (ANN, BO)))
+    for tool, arguments in (
+        ("preview_leave", {"leave_type": "Casual Leave", "date_from": "2026-10-01",
+                           "day_portion": "Full Day"}),
+        ("apply_leave", APPLY),
+        ("apply_wfh", {"date_from": "2026-10-05", "wfh_mode": "Full Day", "reason": "plumber"}),
+        ("apply_comp_off", {"work_date": "2026-10-02", "reason": "release"}),
+    ):
+        result = call(client, tool, arguments)
+        assert result["isError"] is True, tool
+        assert "who should approve it" in text(result), tool
+    assert _called(hrms, "apply_leave") == []
+    assert _called(hrms, "apply_wfh") == []
+    assert _called(hrms, "apply_comp_off") == []
+
+
+def test_a_pick_that_is_nobodys_manager_never_reaches_the_hrms(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    _projects(hrms, ("Dyn", "choose", (ANN, BO)))
+    result = call(client, "apply_leave", {**APPLY, "approvers": json.dumps(["someone-else"])})
+    assert result["isError"] is True and "not a project manager" in text(result)
+    assert _called(hrms, "apply_leave") == []
+
+
+def test_every_project_that_needs_a_pick_gets_one(client: TestClient, hrms: FakeHrms) -> None:
+    _projects(hrms, ("One", "choose", (ANN, BO)), ("Two", "choose", (CY, ("lead-di", "Di"))))
+    form = _form(call(client, "start_leave_request", {"date_from": "2026-09-30"}))
+    labels = [o["label"] for o in form["questions"][-1]["options"]]
+    assert labels == ["Ann · One", "Bo · One", "Cy · Two", "Di · Two"]
+    result = call(client, "apply_leave", {**APPLY, "approvers": json.dumps(["lead-ann"])})
+    assert result["isError"] is True and "Two" in text(result)
+    assert _called(hrms, "apply_leave") == []
+
+
+def test_fixed_leads_and_a_lone_choose_lead_are_named_beside_the_picks(
+    client: TestClient, hrms: FakeHrms
+) -> None:
+    _projects(
+        hrms,
+        ("Fix", "fixed", (CY,)),
+        ("Solo", "choose", (("lead-di", "Di"),)),
+        ("Dyn", "choose", (ANN, BO)),
+    )
+    checked = text(call(client, "preview_leave", {
+        "leave_type": "Casual Leave", "date_from": "2026-10-01", "day_portion": "Full Day",
+        "approvers": json.dumps(["lead-bo"]),
+    }))
+    assert "It goes to Cy, Di and Bo; any one of them can approve it." in checked
+
+
+def test_wfh_and_comp_off_send_the_picks_too(client: TestClient, hrms: FakeHrms) -> None:
+    _projects(hrms, ("Dyn", "choose", (ANN, BO)))
+    hrms.results["apply_wfh"] = {"wfh_id": "w-1", "status": "Pending"}
+    hrms.results["apply_comp_off"] = {"comp_off_id": 8, "work_date": "2026-10-02",
+                                       "status": "Pending"}
+    picked = json.dumps(["lead-bo"])
+    wfh = text(call(client, "apply_wfh", {
+        "date_from": "2026-10-05", "wfh_mode": "Full Day", "reason": "plumber",
+        "approvers": picked,
+    }))
+    assert wfh.startswith("Filed:") and "It is waiting for Bo to approve." in wfh
+    assert _called(hrms, "apply_wfh")[0]["project_manager_ids"] == ["lead-bo"]
+
+    comp = text(call(client, "apply_comp_off", {
+        "work_date": "2026-10-02", "reason": "release", "approvers": picked,
+    }))
+    assert comp.startswith("Filed:") and "It is waiting for Bo to approve." in comp
+    assert _called(hrms, "apply_comp_off")[0]["project_manager_ids"] == ["lead-bo"]
+
+    form = _form(call(client, "start_wfh_request", {"date_from": "2026-10-05"}))
+    assert form["questions"][-1]["kind"] == "multichoice"
+    hrms.results["preview_wfh"] = {"within_policy": True}
+    checked = text(call(client, "preview_wfh", {
+        "date_from": "2026-10-05", "wfh_mode": "Full Day", "approvers": picked,
+    }))
+    assert "Bo will approve it." in checked
+
+
+def test_the_context_says_where_the_person_chooses(client: TestClient, hrms: FakeHrms) -> None:
+    _projects(hrms, ("Fix", "fixed", (CY,)), ("Dyn", "choose", (ANN, BO)))
+    said = text(call(client, "get_leave_context"))
+    assert "Fix: Cy; Dyn: you choose among Ann and Bo." in said
