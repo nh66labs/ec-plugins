@@ -25,6 +25,7 @@ from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
+from hrms_mcp import approver_choice
 from hrms_mcp.compoff import _today_of
 from hrms_mcp.forms import PORTIONS, _portion_named
 from hrms_mcp.hrms import Hrms
@@ -112,6 +113,9 @@ def register(server: MCPServer, hrms: Hrms) -> None:
             known["reason"] = reason.strip()
         else:
             questions.append({"name": "reason", "label": "Reason", "kind": "text"})
+        # Last, and only where a project lets the person choose who approves.
+        if ask := approver_choice.question(await approver_choice.read_options(hrms, ctx)):
+            questions.append(ask)
 
         prompt = wfh_line(date_from, date_to, mode)
         prompt += " — choose the rest:" if questions else "."
@@ -143,6 +147,8 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         ctx: Context,
         date_to: str = "",
         reason: str = "",
+        # The project managers the person chose, where a project lets them.
+        approvers: str = "",
     ) -> str:
         """Check a work-from-home request before filing it, creating nothing:
         a heads-up when it takes the person past the weekly WFH limit, and
@@ -151,9 +157,9 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         with the same details. The answer is written to the person asking."""
         date_from, until = dates_of(date_from, date_to)
         # Independent of each other: side by side, the check waits for the slower only.
-        result, approvers = await asyncio.gather(
+        result, who = await asyncio.gather(
             _ask(hrms, ctx, "preview_wfh", {"date_from": date_from, "date_to": until}),
-            _approvers(hrms, ctx),
+            _approvers(hrms, ctx, approvers),
         )
         if not isinstance(result, dict):
             return str(result)
@@ -162,7 +168,7 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         sections = [
             warning_of([over_limit(result, date_from)]),
             head,
-            f"{approvers}\nNothing is filed until you confirm.",
+            f"{who}\nNothing is filed until you confirm.",
         ]
         return "\n\n".join(s for s in sections if s)
 
@@ -173,13 +179,16 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         reason: str,
         ctx: Context,
         date_to: str = "",
+        # The project managers the person chose, where a project lets them.
+        approvers: str = "",
     ) -> str:
         """File a work-from-home request for the person asking. They confirm it first.
 
         Call preview_wfh with the same details before this. Every argument comes
         from what the person said or from get_leave_context — never guess a WFH
         mode or a reason. Dates are YYYY-MM-DD; date_to defaults to date_from.
-        It goes to every one of their project managers.
+        It goes to their project managers: all of them, or, for a project where
+        the person chooses, the ones they chose.
         """
         if not reason.strip():
             raise ToolError("A reason is needed. Ask the person why they need to work from home.")
@@ -195,20 +204,19 @@ def register(server: MCPServer, hrms: Hrms) -> None:
             ):
                 return f"Already filed: {what} — {item.get('status')}. Nothing new was filed."
 
-        # No project manager is sent: the HRMS sends it to every one of theirs.
-        filed = await _ask(
-            hrms,
-            ctx,
-            "apply_wfh",
-            {
-                "date_from": date_from,
-                "date_to": date_to,
-                "leave_mode": wfh_mode,
-                "reason": reason.strip(),
-            },
-        )
+        # No project manager is sent unless the person chose: the HRMS sends it
+        # to every one of theirs.
+        arguments: dict[str, Any] = {
+            "date_from": date_from,
+            "date_to": date_to,
+            "leave_mode": wfh_mode,
+            "reason": reason.strip(),
+        }
+        if picks := await approver_choice.picks_from(hrms, ctx, approvers):
+            arguments["project_manager_ids"] = picks
+        filed = await _ask(hrms, ctx, "apply_wfh", arguments)
         status = filed.get("status", "Pending") if isinstance(filed, dict) else "Pending"
-        waiting = await _waiting_for(hrms, ctx) if status == "Pending" else ""
+        waiting = await _waiting_for(hrms, ctx, approvers) if status == "Pending" else ""
         return (
             f"Filed: {what[:1].upper()}{what[1:]} — reason: {reason.strip()}. "
             f"Status: {status}.{waiting}"

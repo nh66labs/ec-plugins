@@ -26,7 +26,7 @@ from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
-from hrms_mcp import workload
+from hrms_mcp import approver_choice, workload
 from hrms_mcp.hrms import Hrms, HrmsError
 from hrms_mcp.tools import (
     DayPortion,
@@ -126,10 +126,19 @@ def _decided(item: dict[str, Any], who: str) -> str:
     )
 
 
-async def _waiting_for(hrms: Hrms, ctx: Context) -> str:
+async def _waiting_for(hrms: Hrms, ctx: Context, picked: str = "") -> str:
     """Who a request just filed waits for, said to the person who filed it — or
     nothing when the HRMS cannot say: the request is filed either way, so this
     read never fails the filing."""
+    options = await approver_choice.read_options(hrms, ctx)
+    if approver_choice.choosing(options):
+        try:
+            who = approver_choice.sentence(
+                options, approver_choice.picks_for(options, picked), filed=True
+            )
+        except ToolError:
+            return ""
+        return f" {who}" if who else ""
     try:
         result = await _ask(hrms, ctx, "get_employee_project_managers", {})
     except ToolError:
@@ -210,13 +219,16 @@ def register(server: MCPServer, hrms: Hrms) -> None:
         # Accepted and ignored, so a card saved before every project manager
         # approved still validates: the HRMS sends the request to them all.
         approver: str = "",
+        # The project managers the person chose, where a project lets them.
+        approvers: str = "",
     ) -> str:
         """File a leave request for the person asking. They confirm it first.
 
         Call preview_leave with the same details before this. Every argument
         comes from what the person said or from get_leave_context — never guess
         a leave type, a day portion or a reason. Dates are YYYY-MM-DD; date_to
-        defaults to date_from. It goes to every one of their project managers.
+        defaults to date_from. It goes to their project managers: all of them,
+        or, for a project where the person chooses, the ones they chose.
         """
         if not reason.strip():
             raise ToolError("A reason is needed. Ask the person why they need the leave.")
@@ -241,11 +253,13 @@ def register(server: MCPServer, hrms: Hrms) -> None:
             "date_to": date_to,
             "reason": reason.strip(),
         }
-        # No approver is sent: the HRMS sends it to every project manager of
-        # theirs, fixed when it is filed.
+        # No approver is sent unless the person chose: the HRMS sends it to
+        # every project manager of theirs, fixed when it is filed.
+        if picks := await approver_choice.picks_from(hrms, ctx, approvers):
+            arguments["project_manager_ids"] = picks
         filed = await _ask(hrms, ctx, "apply_leave", arguments)
         status = filed.get("status", "Pending") if isinstance(filed, dict) else "Pending"
-        waiting = await _waiting_for(hrms, ctx) if status == "Pending" else ""
+        waiting = await _waiting_for(hrms, ctx, approvers) if status == "Pending" else ""
         return (
             f"Filed: {kind_of(leave_type)}, {when_of(date_from, date_to)}, "
             f"{portion_of(day_portion)} — reason: {reason.strip()}. Status: {status}.{waiting}"
