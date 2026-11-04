@@ -82,7 +82,7 @@ def question(projects: list[dict[str, Any]]) -> dict[str, Any] | None:
             options.append({"value": key, "label": label})
     return {
         "name": ARGUMENT,
-        "label": "Who should approve this?",
+        "label": "Select your team leads",
         "kind": "multichoice",
         "options": options,
     }

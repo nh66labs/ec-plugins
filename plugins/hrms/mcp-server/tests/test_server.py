@@ -2050,7 +2050,7 @@ def test_a_choose_project_asks_who_should_approve(client: TestClient, hrms: Fake
         "leave_type", "day_portion", "reason", "approvers",
     ]
     assert form["questions"][-1] == {
-        "name": "approvers", "label": "Who should approve this?", "kind": "multichoice",
+        "name": "approvers", "label": "Select your team leads", "kind": "multichoice",
         "options": [
             {"value": "lead-ann", "label": "Ann"},
             {"value": "lead-bo", "label": "Bo"},
