@@ -30,6 +30,14 @@ plugins:
       # blocks an install; the plugin says it is waiting until it is connected.
       mcp_servers: [hrms]
 
+  - plugin_id: pm
+    name: Project management
+    summary: Reads a delivery portfolio out of Jira and reports on it every week - what shipped, what is stuck and why, and what needs a decision.
+    version: 1.5.2
+    manifest: plugins/pm/manifest.yaml
+    requires:
+      connectors: [jira]
+
   - plugin_id: client-timesheet
     name: Client timesheet
     summary: Keeps the monthly timesheet a client asks for, for the company's employees placed there - who is who at the client, each person's hours from the client's Jira, and the tickets missing an epic, an estimate or a reason.
