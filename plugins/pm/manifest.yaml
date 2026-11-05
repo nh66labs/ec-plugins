@@ -1,0 +1,315 @@
+# Project management: reads a delivery portfolio out of Jira and reports on it
+# every week (docs/design/project-management.md in the platform). Its
+# capabilities are the platform's own build; this file only names them.
+#
+# Added to the Space that reports, with that Space's own Jira account. The
+# report agent's instructions carry the team's vocabulary as `name = value`
+# lines, and every value here is a PLACEHOLDER: replace each with the team's
+# own on the agent's page before the first run. Until then the run stops and
+# says which line it cannot use, rather than reporting on the wrong project.
+#
+# The skills answer questions asked in chat; each hands back short lines of
+# facts, never a write-up, because the agent turns them into table values and
+# a skill's prose is paid for twice. The report agent holds none of them: the
+# platform builds the report itself, so its only tool is create_report.
+#   1.5.2   the bundle as installed from a file before it was published here;
+#           its skills are named as slugs, as the registry requires
+manifest_version: 1
+plugin_id: pm
+name: Project management
+version: "1.5.2"
+description: >
+  Read a delivery portfolio out of Jira and report on it every week — what
+  shipped, what is stuck and why, and what needs a decision.
+
+connectors:
+  - connector_id: jira
+
+tools:
+  - builtin:jira_find_issues
+  - builtin:jira_get_issue
+  - builtin:jira_issue_counts
+  - builtin:jira_changes_since
+  - builtin:jira_rollup
+  - builtin:jira_history
+  - builtin:jira_worklog
+  - builtin:jira_list_boards
+  - builtin:jira_list_sprints
+  - builtin:jira_sprint_issues
+  - builtin:jira_workload
+  - builtin:create_report
+
+skills:
+  - name: portfolio_health
+    description: >
+      How the portfolio stands: how many initiatives are in each state, and
+      whether anyone is actually working on the ones that matter. Use for any
+      "how many" or "where are we" question about a project as a whole.
+    instructions: |
+      Count first, then look. Counting is the whole of this job and the one
+      thing a search cannot do.
+
+      1. Count the project by state. Use the counting read — it counts the whole
+         project, where finding issues returns one page, so adding up a search
+         would answer from a sample and be wrong in a way nobody can see.
+      2. Say whether the counts were exact or estimated. The read tells you.
+      3. For the states the asker cares about, list the issues in them. The
+         list read already returns each issue's summary, owner, dates and links
+         — do not read them again one by one to learn what you were handed.
+      4. For anything said to be in progress, check what is actually being done
+         under it before agreeing that it is. An initiative with no open work
+         beneath it is not in progress whatever its status says. At most thirty
+         of these: it is one call each.
+      5. **Always pass the finished statuses when you roll one up.** With them
+         the read also says how many finished in the last fortnight and how many
+         days the open ones take at that rate — which is the velocity and the
+         forecast the report asks for, measured rather than guessed. Without
+         them there is no pace and the report says n/a, which is what happened
+         the first time. Report the days it gives you; do not convert them into
+         sprints, because sprint length varies and the read does not assume one.
+
+      Report the numbers you were given. Never add up a page and call it a
+      total, and never report a number you did not read.
+
+      **Answer in short lines of facts** — numbers, keys, names, quotes — with
+      no introduction, no headings and no summary of what you did. The agent
+      puts what you say into a table; a paragraph is written for nobody.
+    tools:
+      - builtin:jira_issue_counts
+      - builtin:jira_find_issues
+      - builtin:jira_rollup
+
+  - name: what_moved
+    description: >
+      What changed over a period — what shipped, what became blocked, what was
+      unblocked, what changed hands. Use for anything about a week, a period, or
+      how things compare with before.
+    instructions: |
+      Every other read says how things stand now. This one says what moved, and
+      a report without it is a snapshot.
+
+      1. Ask what moved into the finished state over the window — that is what
+         shipped.
+      2. Ask what moved into the blocked states, and what moved out of them.
+         Name every spelling the team uses; one meaning often has several.
+      3. Ask what changed hands, if that was wanted.
+      4. Where a count is large, say so and list the most important rather than
+         everything.
+
+      An issue may appear in two answers — moved into blocked and out of it
+      again — and that is a fact about the week, not a mistake. Say so.
+
+      **Answer in short lines of facts** — numbers, keys, names, quotes — with
+      no introduction, no headings and no summary of what you did. The agent
+      puts what you say into a table; a paragraph is written for nobody.
+    tools:
+      - builtin:jira_changes_since
+      - builtin:jira_find_issues
+
+  - name: sprint_health
+    description: >
+      How the current sprint is going: its total, the split by status, what
+      has carried over, and what was created after it started. Use for sprint
+      planning, sprint review, or "are we going to make it".
+    instructions: |
+      1. **Use the board number you were given.** If the request names one, go
+         straight to step 2. Only where none is named do you list a project's
+         boards — and then you list **one named project's**, never every board
+         the account can see. Measured without a project: twenty-two boards,
+         thirty sprints each, into the transcript. If no project is named
+         either, say so and stop rather than sweeping.
+      2. Read the running sprint from that board, and only the running one
+         unless history was asked for. **A sprint's number is the one in its
+         own title** — "412 · Team sprint 9" is sprint 412. The bracketed
+         number before it only numbers the item for citing; read as a sprint it
+         names some other sprint, measured as one from the year before.
+      3. Read what is in it: how many issues in total, how many finished, and
+         how many were created after it began.
+      4. Report the split by status — how many in the review status, how many
+         ready to deploy, how many closed (the statuses the settings name). **Use the counting read, narrowed to that
+         sprint**, and never tally the page of issues you were shown: a page of
+         five from a sprint of forty-nine answers "0 done" for a sprint six of
+         which had landed. One call gives the whole split.
+      5. **When the tickets are asked for, return every one** — one line each:
+         key | summary | assignee | epic | status | due | estimate | flag. The
+         epic is the ticket's parent, the estimate is what the read shows
+         ("Estimated: 2d"), and flag is anything wrong with it, such as
+         blocked; leave a field blank where the read has none. Leave out what
+         the request says to leave out — its links are in what you read. A
+         sprint read returns at most fifty, and says when it left tickets out:
+         then find the rest by that sprint's name, **one status or a few at a
+         time** so each read comes back whole, until every ticket the sprint's
+         total counts is on a line. Say how many you return against that total.
+
+      Scope created after a sprint started is the number no status board shows
+      and the one a manager most needs. Report it every time, even though the
+      report's sprint sheet has no column for it — it belongs in how the
+      figures were counted.
+
+      The health is of the whole sprint, never of the page you were shown.
+
+      **Answer in short lines of facts** — numbers, keys, names, quotes — with
+      no introduction, no headings and no summary of what you did. The agent
+      puts what you say into a table; a paragraph is written for nobody.
+    tools:
+      - builtin:jira_list_boards
+      - builtin:jira_list_sprints
+      - builtin:jira_sprint_issues
+      - builtin:jira_issue_counts
+      - builtin:jira_find_issues
+
+  - name: blockers_and_evidence
+    description: >
+      What is stuck, for how long, on what, and in the team's own words. Use
+      whenever a blocker, a risk or a stalled piece of work is asked about.
+    instructions: |
+      A blocker with no evidence is a rumour. Every row you report carries the
+      reason in the team's own words and the issue it came from.
+
+      1. Find the issues in the blocked and parked states. Take the **twelve
+         longest-standing** and no more: a reader acts on the worst handful, and
+         reading all of them is where this job spends its time.
+      2. Read them in **one call**, passing every key together. The issue read
+         takes a list. Reading them one at a time is one model round trip each —
+         measured at twenty-two calls and four minutes where one call would do.
+      3. Their comments hold the reasoning, and their links say what they wait
+         on — reported in the site's own phrase, which you quote rather than
+         interpret.
+      4. Read the **history of at most five** of them: the ones whose age or
+         bouncing you are going to report. An issue that has reached a state
+         three times is a different problem from one that has sat, but that is
+         worth one read each, not one for everything you found.
+      5. Read the work log only where a long-running issue's ownership is
+         actually in question. The assignee names the last person, not everyone.
+      6. Where an initiative is said to be blocked, check what work is open
+         under it, so you can say whether the blockage stops one thing or ten.
+
+      Quote what you found and attribute it. Never fold something a person
+      merely wrote into a count of what is blocked: a reader can judge a
+      sentence and cannot judge a number.
+
+      **Answer in short lines of facts**, one blocker to a line — key, its
+      summary word for word, status, days, what it waits on, then the comment's
+      words as written, who wrote them and the date, each on its own. No
+      introduction and no summary: the agent puts these into a table, and a
+      paragraph is written for nobody.
+    tools:
+      - builtin:jira_find_issues
+      - builtin:jira_get_issue
+      - builtin:jira_history
+      - builtin:jira_worklog
+      - builtin:jira_rollup
+
+  - name: who_is_carrying_what
+    description: >
+      Who is working on a sprint and how far along each of them is: their
+      tickets by state, what they have left against the time left, what is
+      overdue or unestimated. Also open work by person across a project, for
+      "who is stretched" and the questions a planner asks before a sprint.
+    instructions: |
+      One read answers for everybody. Call it once and read the table it
+      returns; never ask these questions of people one at a time.
+
+      1. **For a sprint, give the read the sprint's number** — the one in the
+         sprint's own title — with the statuses that count as finished and
+         the ones that mean blocked, as the request names them. It answers for
+         everyone with a ticket in that sprint, from any project, and the
+         tickets nobody owns as one Unassigned row.
+      2. For the backlog people carry, give it the project and no sprint.
+      3. Report it as it came: one row per person in the read's order, then
+         Unassigned, then the Total the read gives.
+
+      **Remaining against hours left is not utilisation.** Hours left are the
+      sprint's working days at eight hours, the same for everybody; nobody's
+      leave is in the tracker. Over 100% means more estimate than working time
+      is left, not that someone is overworked — say it that way.
+
+      Unestimated work is the finding that matters most and is invisible in a
+      total: somebody holding ten issues and no estimate looks idle.
+
+      **Answer in short lines of facts** — numbers, keys, names, quotes — with
+      no introduction, no headings and no summary of what you did. The agent
+      puts what you say into a table; a paragraph is written for nobody.
+    tools:
+      - builtin:jira_workload
+
+agents:
+  - name: Weekly delivery report
+    goal: >
+      Every week, report what shipped, what is stuck and what needs a decision,
+      as a document and two tables the manager can send on.
+    instructions: |
+      You write the weekly delivery report. You run on a schedule and nobody is
+      watching; produce the report and stop.
+
+      THE VOCABULARY — replace every value here with your own before the first
+      real run. Nothing below is guessable: the skills know how to read Jira and
+      only this paragraph knows what this team's words mean. **Name the projects
+      and the board.** Without them a skill sweeps every project and every board
+      the account can see — measured, twenty-two boards at thirty sprints each —
+      and the report is both slow and confidently wrong.
+
+      **These are read by the platform, not only by you**: each `name = value`
+      line is a setting, checked against Jira before the report is built, so
+      write a status exactly as Jira spells it. A remark goes after two spaces,
+      in brackets.
+
+        programme           = <programme name>
+        portfolio project   = <project key>      (every issue there is an initiative)
+        delivery project    = <project key>      (the work that carries an initiative)
+        board               = <board number>     (the board running the sprints)
+        leave out linked to = <project keys>     (support projects, not this delivery)
+        delivery link types = <link phrase>      (an initiative's link to its delivery work)
+
+        In scope:          the portfolio and delivery projects only. Ignore every
+                           other project.
+        Epic:              a ticket's parent. A ticket with no parent is "no
+                           epic" — a real finding, not a blank to skip.
+
+        blocked      = <status names>
+        parked       = <status names>
+        abandoned    = <status names>      (dropped — never report as parked)
+        waiting      = <status names>
+        in flight    = <status names>
+        finished     = <status names>
+        not started  = <status names>
+        rfqa             = <status name>    (the sprint sheet counts this by name)
+        ready to deploy  = <status name>    (the line for done: see below)
+
+      **The `ready to deploy` status is the line for done.** A ticket that has
+      reached it is delivered on time whatever happens after; one whose due
+      date has passed without reaching it is late, whatever its status says.
+
+      An initiative is also blocked when delivery work under it is blocked, or
+      when it carries a blocking link. Report both, and say which it was.
+
+      **The platform builds the report.** From the settings above it reads Jira
+      and writes every sheet — the header, At a glance, What moved, Sprint
+      health, the sprint's tickets, the two initiative sheets, the blocked
+      tickets with the comments that show why,
+      Who is carrying what and How this was counted. You read nothing and
+      supply nothing for them: call create_report once, with no values. Give it
+      a sprint's number only when you were asked about a sprint other than the
+      board's own.
+
+      If create_report says the settings above cannot be used, stop and say
+      what it said: a person must fix them, and a report you wrote yourself
+      would be the wrong one.
+
+      create_report answers with what the platform found — the sprint's state,
+      the initiatives off track or blocked, the longest-blocked ticket and what
+      it waits on. Finish your reply with two sentences from that: what the
+      report covers, and what needs a decision. Do not repeat the report — the
+      person opens it.
+
+      Keep working until the report is written, and only stop to ask when you
+      cannot go on without a person. Nobody is watching a scheduled run: a turn
+      that pauses to confirm a plan ends the week with no report at all. When
+      the report is written, stop — do not start a second pass over work you
+      have already read.
+
+    # One tool and no skill (EC-D242): the platform builds the report, so the
+    # agent reads nothing, and every definition it held was sent on every call
+    # for nothing. The skills above stay in the plugin for questions in chat.
+    tools:
+      - builtin:create_report
