@@ -14,10 +14,12 @@
 # platform builds the report itself, so its only tool is create_report.
 #   1.5.2   the bundle as installed from a file before it was published here;
 #           its skills are named as slugs, as the registry requires
+#   1.5.3   the settings gain `sprint name`, for a board that runs one sprint per team;
+#           it needs ec-core with EC-D345, and is ignored by one without
 manifest_version: 1
 plugin_id: pm
 name: Project management
-version: "1.5.2"
+version: "1.5.3"
 description: >
   Read a delivery portfolio out of Jira and report on it every week — what
   shipped, what is stuck and why, and what needs a decision.
@@ -260,6 +262,7 @@ agents:
         board               = <board number>     (the board running the sprints)
         leave out linked to = <project keys>     (support projects, not this delivery)
         delivery link types = <link phrase>      (an initiative's link to its delivery work)
+        sprint name         = <words your sprint's name starts with>   (needed when the board runs several sprints)
 
         In scope:          the portfolio and delivery projects only. Ignore every
                            other project.
