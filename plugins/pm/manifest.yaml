@@ -16,16 +16,22 @@
 #           its skills are named as slugs, as the registry requires
 #   1.5.3   the settings gain `sprint name`, for a board that runs one sprint per team;
 #           it needs ec-core with EC-D345, and is ignored by one without
-manifest_version: 1
+#   1.6.0   the Space keeps a roster of its team (`team_roster`, which needs
+#           manifest format 2); needs ec-core with EC-D346, and is refused by one without
+manifest_version: 2
 plugin_id: pm
 name: Project management
-version: "1.5.3"
+version: "1.6.0"
 description: >
   Read a delivery portfolio out of Jira and report on it every week — what
   shipped, what is stuck and why, and what needs a decision.
 
 connectors:
   - connector_id: jira
+
+# The Space keeps a roster of its team: who they are in Jira and in the client's
+# Slack, for the sprint allocation. Uploaded by a Space Admin (ec-core EC-D346).
+team_roster: true
 
 tools:
   - builtin:jira_find_issues
