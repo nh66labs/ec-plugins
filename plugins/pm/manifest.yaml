@@ -18,10 +18,13 @@
 #           it needs ec-core with EC-D345, and is ignored by one without
 #   1.6.0   the Space keeps a roster of its team (`team_roster`, which needs
 #           manifest format 2); needs ec-core with EC-D346, and is refused by one without
+#   1.7.0   the report's Who is carrying what sheet becomes Sprint Allocation, and the
+#           settings gain `team`, the allocation, hours, holiday, timezone and leave
+#           sheet lines; needs ec-core with EC-D344, and is ignored by one without
 manifest_version: 2
 plugin_id: pm
 name: Project management
-version: "1.6.0"
+version: "1.7.0"
 description: >
   Read a delivery portfolio out of Jira and report on it every week — what
   shipped, what is stuck and why, and what needs a decision.
@@ -270,6 +273,18 @@ agents:
         delivery link types = <link phrase>      (an initiative's link to its delivery work)
         sprint name         = <words your sprint's name starts with>   (needed when the board runs several sprints)
 
+        The Sprint Allocation sheet reads these. Without `team`, or with a team
+        the Space's roster lacks, the sheet is left out and the report says why.
+        team                 = <the roster's Team for this report>
+        ideal allocation     = 80      (percent of a person's hours the work should take)
+        allocation tolerance = 10      (points either side of the ideal that count as on target)
+        hours per day        = 8
+        half day hours       = 5       (hours worked on a half day of leave)
+        timezone             = <IANA zone, e.g. Asia/Dubai>   (the zone a day is counted in)
+        client holidays      = <YYYY-MM-DD, YYYY-MM-DD>   (days nobody works, whoever's leave it is)
+        leave sheet          = <the leave spreadsheet's id or link>
+        leave sheet tab      = Leave Requests
+
         In scope:          the portfolio and delivery projects only. Ignore every
                            other project.
         Epic:              a ticket's parent. A ticket with no parent is "no
@@ -296,7 +311,7 @@ agents:
       and writes every sheet — the header, At a glance, What moved, Sprint
       health, the sprint's tickets, the two initiative sheets, the blocked
       tickets with the comments that show why,
-      Who is carrying what and How this was counted. You read nothing and
+      Sprint Allocation and How this was counted. You read nothing and
       supply nothing for them: call create_report once, with no values. Give it
       a sprint's number only when you were asked about a sprint other than the
       board's own.
