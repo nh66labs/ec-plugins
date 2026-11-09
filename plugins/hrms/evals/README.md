@@ -40,6 +40,11 @@ Compare two runs with `python -m app.evals compare BEFORE.json AFTER.json`.
   need no WFH request of theirs already filed for next Tuesday. The `comp-off-`
   cases need Gandhi Jayanti among the company's holidays, and no comp-off of
   theirs already filed for it.
+  The `mbo-` and `weekly-` cases need the employee's plan for the current quarter
+  to be a Draft with MBO setting open, and at least one MBO on it. `weekly-what-is-the-w1-task`
+  and `weekly-progress-question-marks-nothing` also need a weekly plan saved
+  under it (tasks in at least the first few weeks). Nothing is saved or marked: no
+  card is ever confirmed.
 - **manager-cases**: at least one request waiting on the manager.
   `approve-as-one-of-several-approvers` also needs a request filed under
   "every project manager must approve" with three approvers: one who has

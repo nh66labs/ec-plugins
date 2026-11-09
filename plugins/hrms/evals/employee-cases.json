@@ -165,6 +165,36 @@
       "reference": "Suggestions are not an agreed set: shows the three and asks whether to save them as a Draft, rather than proposing the save."
     },
     {
+      "id": "weekly-split-proposes-without-saving",
+      "ask": "Split my Draft MBOs into weekly tasks",
+      "expect": { "no_action": true, "mention": ["week"], "not_mention": ["| ---", "|---"] },
+      "reference": "Proposes one short, concrete task per week for each MBO, from the current week on, using the weeks' dates the plan gives, and says they are suggestions; laid out as short lines per MBO, not a table. Then asks whether to save them. No card yet: nothing is saved before the person agrees."
+    },
+    {
+      "id": "weekly-save-after-agreement",
+      "ask": "Save these as the weekly plan of my first MBO: week 6 freeze the scope, week 7 cut the release candidate",
+      "expect": { "action": { "tool": "save_my_weekly_plan", "state": "proposed", "arguments": { "mbo_number": 1 } } },
+      "reference": "A card for save_my_weekly_plan: the first MBO's number and title, and one line per week (Week 6, Week 7) with the person's own words. One MBO only."
+    },
+    {
+      "id": "weekly-what-is-the-w1-task",
+      "ask": "What is my week 1 task?",
+      "expect": { "no_action": true, "not_mention": ["table card", "can't reread", "cannot reread"] },
+      "reference": "Reads the saved weekly plan and answers from it, naming each MBO's task for that week, or says nothing is planned for that week and offers to plan it. Never makes a task up and never says it cannot read the plan."
+    },
+    {
+      "id": "weekly-marks-a-week-only-when-told",
+      "ask": "I finished the week 6 task of my first MBO",
+      "expect": { "action": { "tool": "mark_my_week", "state": "proposed", "arguments": { "mbo_number": 1, "week": 6, "status": "done" } } },
+      "reference": "A card for mark_my_week: MBO 1, week 6, done. Nothing is marked until it is confirmed."
+    },
+    {
+      "id": "weekly-progress-question-marks-nothing",
+      "ask": "How is my weekly plan going?",
+      "expect": { "no_action": true },
+      "reference": "Reports from the saved plan which weeks are done, not done or still unmarked, without marking anything. No mark_my_week card."
+    },
+    {
       "id": "trend-of-a-colleague-is-refused",
       "ask": "What is the trend of Dev User taking leave?",
       "expect": { "outcome": "answered", "no_action": true, "mention": ["administrator"] },

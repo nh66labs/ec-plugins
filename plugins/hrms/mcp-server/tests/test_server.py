@@ -180,7 +180,7 @@ READS = {
 }
 WRITES = {
     "apply_leave", "cancel_my_leave", "approve_leave", "reject_leave", "save_my_mbo_plan",
-    "delete_my_mbo", "clear_my_mbo_plan",
+    "delete_my_mbo", "clear_my_mbo_plan", "save_my_weekly_plan", "mark_my_week",
     "apply_wfh", "apply_comp_off", "cancel_my_wfh", "cancel_my_comp_off",
     "create_employee", "confirm_my_profile",
     "confirm_orientation", "complete_orientation",
