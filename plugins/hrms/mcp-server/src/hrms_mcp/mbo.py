@@ -32,7 +32,9 @@ from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
+from hrms_mcp import mbo_weekly
 from hrms_mcp.hrms import Hrms
+from hrms_mcp.mbo_weekly import current_week_line, weeks_lines
 from hrms_mcp.tools import READ_ONLY, _ask, _identity
 
 #: Replaces the plan's MBOs with the set given — a write, and safe to repeat.
@@ -103,16 +105,17 @@ Setting MBOs (quarterly objectives):
 1. Call get_my_mbo_context and recall_about_me first, and
    lay suggestions out as its result says. Work on the quarter they name,
    else the open one.
-2. Search this Space for their own project's milestones, deadlines and risks
-   (memory, Jira, GitHub), and for the guides its result names. Never invent facts.
+2. Search this Space for their project's milestones, deadlines and risks,
+   and for the guides its result names. Never invent facts.
 3. Suggest exactly three MBOs straight away, weightages totalling 100.
 4. When one is turned down, ask briefly what did not fit, then offer a
    genuinely different direction. Judge any goal or change they propose by
    the criteria guide: search it and cite it.
 5. Never save before they agree a set the criteria guide allows, totalling exactly
    100; then call save_my_mbo_plan.
-6. Only ever discuss the person's own MBOs, never a colleague's.
+6. Only ever discuss the person's own MBOs.
 7. Keep every reply short: no preamble, nothing restated.
+8. Weekly tasks: follow save_my_weekly_plan.
 """
 
 
@@ -183,8 +186,13 @@ def _today(session: Any) -> date:
 # ---- turning HRMS answers into lines -------------------------------------------
 
 
-def plan_lines(plan: Any, heading: str) -> list[str]:
-    """A plan as the coach reads it: status, whether it is open, each MBO."""
+def plan_lines(plan: Any, heading: str, *, weeks: bool = False) -> list[str]:
+    """A plan as the coach reads it: status, whether it is open, each MBO.
+
+    ``weeks`` adds, under each MBO, its Baseline, Target and planned weeks, and
+    which week today falls in. Only ``get_my_mbo_plan`` asks for them: the context
+    carries three plans and has to stay short.
+    """
     if not isinstance(plan, dict):
         return [f"{heading}: not available."]
     period = f"Q{plan.get('quarter')} {plan.get('fiscal_year')}"
@@ -209,6 +217,10 @@ def plan_lines(plan: Any, heading: str) -> list[str]:
         if mbo.get("manager_rating"):
             line += f" — manager rating {mbo['manager_rating']:g}"
         lines.append(line)
+        if weeks:
+            lines += weeks_lines(mbo)
+    if weeks and (today := current_week_line(plan)):
+        lines.append(today)
     return lines
 
 
@@ -551,7 +563,11 @@ def register(server: MCPServer, hrms: Hrms, guides: Guides = DEFAULT_GUIDES) -> 
     @server.tool(annotations=READ_ONLY, structured_output=False)
     async def get_my_mbo_plan(ctx: Context, fiscal_year: str = "", quarter: int = 0) -> str:
         """The person's MBO plan for one quarter: its status, whether it can
-        still be changed, and each MBO with its KPI, weightage and ratings.
+        still be changed, and each MBO with its KPI, weightage and ratings, and
+        under each its baseline, target and weekly tasks: every planned week with
+        its dates, its task and whether it is done, not done or unmarked, and which
+        week today falls in. To say what a week's task is, read it here; never
+        make one up.
 
         fiscal_year is like "2026-27" (April to March) and quarter is 1-4 (1 is
         April to June); leave both out for the current quarter.
@@ -564,7 +580,7 @@ def register(server: MCPServer, hrms: Hrms, guides: Guides = DEFAULT_GUIDES) -> 
         if quarter:
             arguments["quarter"] = quarter
         plan = await _ask(hrms, ctx, "get_my_mbo_plan", arguments)
-        return "\n".join(plan_lines(plan, "Plan"))
+        return "\n".join(plan_lines(plan, "Plan", weeks=True))
 
     @server.tool(annotations=REPLACES, structured_output=False)
     async def save_my_mbo_plan(
@@ -699,3 +715,5 @@ def register(server: MCPServer, hrms: Hrms, guides: Guides = DEFAULT_GUIDES) -> 
             + plan_lines(left, "Plan")
             + ["The plan is kept, empty, as a Draft."]
         )
+
+    mbo_weekly.register(server, hrms)
