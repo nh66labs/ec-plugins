@@ -33,7 +33,7 @@ plugins:
   - plugin_id: pm
     name: Project management
     summary: Reads a delivery portfolio out of Jira and reports on it every week - what shipped, what is stuck and why, and what needs a decision.
-    version: 1.6.0
+    version: 1.7.0
     manifest: plugins/pm/manifest.yaml
     requires:
       connectors: [jira]
