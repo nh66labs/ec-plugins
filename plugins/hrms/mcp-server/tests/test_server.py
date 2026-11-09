@@ -176,7 +176,7 @@ READS = {
     "start_wfh_request", "preview_wfh", "start_comp_off_request", "preview_comp_off",
     "get_new_employee_options", "check_new_employee", "where_to_upload_documents",
     "get_my_onboarding", "list_orientation_requests",
-    "list_onboardings", "get_onboarding_status",
+    "list_onboardings", "get_onboarding_status", "get_resume",
 }
 WRITES = {
     "apply_leave", "cancel_my_leave", "approve_leave", "reject_leave", "save_my_mbo_plan",
