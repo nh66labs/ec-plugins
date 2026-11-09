@@ -22,7 +22,7 @@ plugins:
   - plugin_id: hrms
     name: HRMS
     summary: Takes and decides leave requests, takes work-from-home and comp-off requests, onboards new employees for HR, and helps people set their MBOs and keep their weekly plan, in the company's HRMS, as the person asking.
-    version: 0.28.0
+    version: 0.29.0
     manifest: plugins/hrms/manifest.yaml
     requires:
       connectors: []
