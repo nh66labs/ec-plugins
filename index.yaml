@@ -22,8 +22,12 @@ plugins:
   - plugin_id: hrms
     name: HRMS
     summary: Takes and decides leave requests, takes work-from-home and comp-off requests, onboards new employees for HR, and helps people set their MBOs and keep their weekly plan, in the company's HRMS, as the person asking.
-    version: 0.29.0
+    version: 0.31.0
     manifest: plugins/hrms/manifest.yaml
+    # Needs an EC platform that reads `confirm_free` in a manifest's mcp_servers
+    # (EC-D359, ec-core backend/app/plugins/manifest.py). An older platform
+    # refuses this manifest at install ("extra fields not permitted"): upgrade
+    # the platform first, or install HRMS 0.29.0.
     requires:
       connectors: []
       # Not in the build: a server an operator runs beside the platform. It never
@@ -57,7 +61,7 @@ mcp_servers:
     name: HRMS MCP server
     summary: Leave, work-from-home, comp-off, MBO and onboarding tools in front of the HRMS — read, file, decide, set MBOs and create new employees — acting as the person asking; and a month's leave calendar for the client timesheet.
     source: plugins/hrms/mcp-server
-    image: ghcr.io/nh66labs/ec-hrms-mcp:0.31.3
+    image: ghcr.io/nh66labs/ec-hrms-mcp:0.34.0
 
 connectors:
   - connector_id: apollo

@@ -6,7 +6,7 @@
 manifest_version: 2
 plugin_id: hrms
 name: HRMS
-version: 0.29.0
+version: 0.31.0
 description: Takes and decides leave requests, takes work-from-home and comp-off requests, answers leave and holiday questions, gives an HRMS administrator an employee's leave trend, onboards a new employee for HR, and helps people set their quarterly MBOs and keep their weekly plan, in the company's HRMS — as the person asking.
 
 # What a person says about themselves while setting MBOs — their interests, what
@@ -20,6 +20,10 @@ mcp_servers:
     name: HRMS
     auth_mode: signed_identity
     lookup_path: /people/lookup
+    # Writes that run in the turn without a confirmation card (EC-D359): saving
+    # the professional wording the assistant wrote for the asker's own resume.
+    confirm_free:
+      - save_resume_wording
     tools:
       # Reads: run in the turn.
       - get_leave_context
@@ -62,6 +66,9 @@ mcp_servers:
       - confirm_my_profile
       - start_profile_update
       - get_resume
+      # Professional wording for the resume's raw points (Jira titles,
+      # timesheet notes), written by the assistant; every copy of the resume uses it.
+      - save_resume_wording
       - confirm_orientation
       - complete_orientation
       - retry_onboarding_step

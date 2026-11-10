@@ -44,6 +44,16 @@ alongside their credentials and their memory. What the index carries instead is
 can tell an administrator *"this plugin needs a newer release"* rather than
 offering an install that could only half-work.
 
+## Platform features a plugin relies on
+
+A manifest field the platform does not know makes it refuse the install, so a
+plugin using a newer field needs a platform that has it. Note it beside the
+plugin in `index.yaml`.
+
+| Field | Platform change | Used by |
+|---|---|---|
+| `mcp_servers[].confirm_free` — writes that run in a person's turn without a confirmation card | EC-D359 | HRMS ≥ 0.31.0 (`save_resume_wording`) |
+
 ## Adding a plugin
 
 1. Create `plugins/<plugin_id>/manifest.yaml`. `plugin_id` is lower-case letters,
