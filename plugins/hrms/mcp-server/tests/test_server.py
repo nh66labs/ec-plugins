@@ -185,7 +185,7 @@ WRITES = {
     "create_employee", "confirm_my_profile",
     "confirm_orientation", "complete_orientation",
     "retry_onboarding_step", "mark_onboarding_step_not_required", "require_onboarding_step",
-    "start_onboarding", "start_profile_update",
+    "start_onboarding", "start_profile_update", "save_resume_wording",
 }
 
 

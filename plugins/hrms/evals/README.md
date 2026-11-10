@@ -45,6 +45,11 @@ Compare two runs with `python -m app.evals compare BEFORE.json AFTER.json`.
   and `weekly-progress-question-marks-nothing` also need a weekly plan saved
   under it (tasks in at least the first few weeks). Nothing is saved or marked: no
   card is ever confirmed.
+  **Except** `resume-raw-points-are-reworded-and-sent`: it needs resume points
+  not yet worded, and running it **saves** their wording (`save_resume_wording`
+  runs without a card, EC-D359), so it passes once per employee. To run it again,
+  clear that employee's saved wording in the HRMS database:
+  `DELETE FROM resume_text_refinements WHERE employee_id = '<their id>';`
 - **manager-cases**: at least one request waiting on the manager.
   `approve-as-one-of-several-approvers` also needs a request filed under
   "every project manager must approve" with three approvers: one who has

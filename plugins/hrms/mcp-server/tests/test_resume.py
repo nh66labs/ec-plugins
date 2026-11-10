@@ -136,3 +136,137 @@ def test_a_failed_file_delivery_is_never_said_to_be_sent(
     assert "Ravi - Engineer" in said
     assert "couldn't send Ravi's resume file" in said
     assert "I've sent" not in said
+
+
+
+RAW = {
+    "employee": "John Doe",
+    "file": "John_Doe_Resume.docx",
+    "own": True,
+    "file_after_wording": True,
+    "to_refine": [
+        {"ref": "a1b2c3d4", "section": "project highlight", "project": "TradeFlow",
+         "text": "KAN-5 fix login bug"},
+        {"ref": "e5f6a7b8", "section": "bio", "text": "Engineer at Co."},
+    ],
+    "to_refine_total": 2,
+}
+SAVED = {"saved": 2, "own": True, "employee": "John Doe", "sent_to": "your Slack DM"}
+
+
+def save_calls(hrms: FakeHrms) -> list[dict]:  # noqa: F811
+    return [c for c in hrms.calls() if c["name"] == "save_resume_wording"]
+
+
+def test_raw_points_are_listed_as_data_and_the_file_is_held(
+    client: TestClient, hrms: FakeHrms  # noqa: F811
+) -> None:
+    hrms.results["get_employee_resume"] = RAW
+    said = text(call(client, "get_resume"))
+    first, _, points = said.partition("Points still in raw wording:")
+    assert "held until its wording is saved" in first and "sent John Doe" not in first
+    assert "a1b2c3d4" not in first
+    assert "[a1b2c3d4] (project highlight — TradeFlow) KAN-5 fix login bug" in points
+    assert "[e5f6a7b8] (bio) Engineer at Co." in points
+    # The platform reads a tool's answer as quoted material: no instructions in it.
+    assert "call save_resume_wording" not in said and "FOR YOU" not in said
+
+
+def test_a_held_file_with_nothing_listed_is_released_not_lost(
+    client: TestClient, hrms: FakeHrms  # noqa: F811
+) -> None:
+    hrms.results["get_employee_resume"] = {**RAW, "to_refine": [{"text": "no ref"}]}
+    hrms.results["save_resume_wording"] = {"saved": 0, "own": True, "sent_to": "your Slack DM"}
+    said = text(call(client, "get_resume", {"mode": "view"}))
+    assert "sent your resume to your Slack messages" in said
+    [saved] = save_calls(hrms)
+    assert saved["arguments"] == {"wording": "", "mode": "view"}
+
+
+def test_someone_elses_held_file_is_never_handed_over_for_rewording(
+    client: TestClient, hrms: FakeHrms  # noqa: F811
+) -> None:
+    hrms.results["get_user_session"] = {"employee_id": "emp-1", "role": "admin"}
+    hrms.results["resolve_employee"] = [JOHN]
+    hrms.results["get_employee_resume"] = {**RAW, "own": False}
+    said = text(call(client, "get_resume", {"employee": "John Doe"}))
+    assert "nothing went to your Slack messages" in said
+    assert "raw wording" not in said and "a1b2c3d4" not in said
+    assert not save_calls(hrms)
+
+
+def test_a_file_already_sent_lists_no_points(client: TestClient, hrms: FakeHrms) -> None:  # noqa: F811
+    hrms.results["get_employee_resume"] = {**SENT, "to_refine": RAW["to_refine"]}
+    said = text(call(client, "get_resume"))
+    assert "sent John Doe's resume" in said and "raw wording" not in said
+
+
+def test_get_resume_says_in_its_description_to_reword_and_save(client: TestClient) -> None:  # noqa: F811
+    tools = {t["name"]: t for t in rpc(client, "tools/list").json()["result"]["tools"]}
+    described = " ".join(tools["get_resume"]["description"].split())
+    assert "Points still in raw wording" in described
+    assert "call save_resume_wording" in described and "without asking" in described
+    assert "has NOT been sent yet" in described
+
+
+def test_no_handoff_when_every_point_is_worded(client: TestClient, hrms: FakeHrms) -> None:  # noqa: F811
+    hrms.results["get_employee_resume"] = SENT
+    assert "raw wording" not in text(call(client, "get_resume"))
+
+
+def test_saving_own_wording_names_no_one_and_says_where_the_file_went(
+    client: TestClient, hrms: FakeHrms  # noqa: F811
+) -> None:
+    hrms.results["save_resume_wording"] = SAVED
+    wording = "[a1b2c3d4] Resolved a login defect\n[e5f6a7b8] Engineer building trade tools"
+    result = call(client, "save_resume_wording", {"wording": wording})
+    assert not result.get("isError")
+    said = text(result)
+    assert "Put 2 points of your resume in professional wording" in said
+    assert "sent your resume to your Slack messages" in said
+    assert "HR-Connect downloads use the new wording too" in said
+    [saved] = save_calls(hrms)
+    assert saved["arguments"] == {"wording": wording, "mode": "download"}
+    assert not [c for c in hrms.calls() if c["name"] == "resolve_employee"]
+
+
+def test_viewing_shows_the_reworded_summary(client: TestClient, hrms: FakeHrms) -> None:  # noqa: F811
+    hrms.results["save_resume_wording"] = {**SAVED, "summary": "John Doe - Engineer"}
+    said = text(call(client, "save_resume_wording", {"wording": "[a1b2c3d4] x", "mode": "view"}))
+    assert said.startswith("John Doe - Engineer")
+    assert save_calls(hrms)[0]["arguments"]["mode"] == "view"
+
+
+def test_a_file_not_sent_is_never_said_to_be_sent(client: TestClient, hrms: FakeHrms) -> None:  # noqa: F811
+    hrms.results["save_resume_wording"] = {"saved": 2, "own": True}
+    said = text(call(client, "save_resume_wording", {"wording": "[a1b2c3d4] x"}))
+    assert "was not sent" in said and "I've sent" not in said
+    hrms.results["save_resume_wording"] = {
+        "saved": 1, "own": True, "delivery_failed": "your email could not be found",
+    }
+    said = text(call(client, "save_resume_wording", {"wording": "[a1b2c3d4] x"}))
+    assert "couldn't send the resume file" in said and "email could not be found" in said
+
+
+def test_a_save_with_nothing_kept_still_says_the_file_was_sent(
+    client: TestClient, hrms: FakeHrms  # noqa: F811
+) -> None:
+    hrms.results["save_resume_wording"] = {
+        "saved": 0, "own": True, "sent_to": "your Slack DM",
+        "rejected": ["[a1b2c3d4] adds a number the original does not have"],
+    }
+    said = text(call(client, "save_resume_wording", {"wording": "[a1b2c3d4] Cut it by 40%"}))
+    assert "sent your resume to your Slack messages as a Word file." in said
+    assert "No new wording was saved" in said and "adds a number" in said
+
+
+def test_saving_wording_is_an_own_resume_write_and_carries_the_rules(
+    client: TestClient,  # noqa: F811
+) -> None:
+    tools = {t["name"]: t for t in rpc(client, "tools/list").json()["result"]["tools"]}
+    save = tools["save_resume_wording"]
+    assert save["annotations"]["readOnlyHint"] is False
+    assert "Use ONLY facts in the original point" in save["description"]
+    assert "no" in save["description"] and "confirmation" in save["description"]
+    assert "employee" not in save["inputSchema"]["properties"], "own resume only"
+    assert tools["get_resume"]["annotations"]["readOnlyHint"] is True

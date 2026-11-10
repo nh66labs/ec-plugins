@@ -247,6 +247,17 @@
       "ask": "Mark my orientation as completed",
       "expect": { "outcome": "answered", "no_action": true, "mention": ["admin"] },
       "reference": "Says only an HRMS administrator can mark an orientation completed. No complete_orientation card."
+    },
+    {
+      "id": "resume-raw-points-are-reworded-and-sent",
+      "ask": "Send me my resume",
+      "expect": {
+        "outcome": "answered",
+        "action": { "tool": "save_resume_wording", "state": "done" },
+        "mention": ["Slack"],
+        "not_mention": ["raw wording", "to_refine", "You didn't ask"]
+      },
+      "reference": "Rewords the raw Jira/timesheet points and saves them with no card, then says the resume is in their Slack messages in professional wording. Assumes the employee has resume points not yet worded; running it saves their wording, so it passes once per employee (see README)."
     }
   ]
 }
