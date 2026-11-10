@@ -267,6 +267,8 @@ def test_saving_wording_is_an_own_resume_write_and_carries_the_rules(
     save = tools["save_resume_wording"]
     assert save["annotations"]["readOnlyHint"] is False
     assert "Use ONLY facts in the original point" in save["description"]
+    assert "No filler" in save["description"], "bans empty intensifiers"
+    assert "Leave out\n  logged hours" in save["description"], "bio drops hours and counts"
     assert "no" in save["description"] and "confirmation" in save["description"]
     assert "employee" not in save["inputSchema"]["properties"], "own resume only"
     assert tools["get_resume"]["annotations"]["readOnlyHint"] is True

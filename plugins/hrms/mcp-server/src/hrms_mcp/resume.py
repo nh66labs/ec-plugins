@@ -77,9 +77,13 @@ WORDING_RULES = """\
 - Project description: 1-2 sentences, present tense, saying what the project is, who
   it is for and what it lets them do, as far as the original says — a product
   summary, not a task ("Internal HR system for employee and leave management").
-- Bio: a 2-4 sentence professional summary, no "I" and no name. Lead with the role,
-  then the projects and skills the original names; turn counts of hours or projects
-  into plain prose rather than leading with them.
+- No filler: never use empty intensifiers such as thorough, comprehensive, robust,
+  seamless, complete, extensive or various; say what was done, not how impressive it
+  was ("verified it through testing", not "through thorough testing").
+- Bio: a 1-4 sentence professional summary, no "I" and no name. Lead with the role,
+  company and start date, then the projects and skills the original names. Leave out
+  logged hours and counts of projects or tickets ("Junior Engineer at Hamon since
+  September 2025", not "...logging 24 hours of project work").
 - Achievement: one clear sentence.
 - Fix spelling and grammar; keep any web link exactly as given; plain text only —
   no markdown, bullets or emojis. A point too vague to improve is lightly cleaned up,
