@@ -63,9 +63,23 @@ WORDING_RULES = """\
   percentages, team sizes, outcomes or responsibilities it does not state.
 - Project highlight: one sentence starting with a strong past-tense action verb
   (Developed, Implemented, Designed, Resolved, Automated, Integrated…), at most 30
-  words, no ticket keys (ABC-123), no "I", no trailing period.
-- Project description: 1-2 sentences, present tense, saying what the project is.
-- Bio: a 2-4 sentence professional summary, no "I" and no name.
+  words, no ticket keys (ABC-123), no "I", no trailing period. Shape it as what was
+  built + for whom or why, when the original states or plainly implies the purpose
+  (e.g. "so managers see only their own project's pending tasks"); never invent one.
+- Vary the opening verb: no two highlights of the same project start with the same
+  verb, and do not repeat a phrase such as "end to end" across them.
+- A point that is only testing or verification: word it as the quality work it was,
+  naming what was validated ("Validated the WFH cancellation flow through end-to-end
+  testing"), never a bare "Tested the implementation".
+- Write for a reader outside the company: spell out internal acronyms and project
+  codenames when the original makes their meaning clear (e.g. "the HR management
+  system" for HRMS), otherwise keep them; keep product names such as Jira or Slack.
+- Project description: 1-2 sentences, present tense, saying what the project is, who
+  it is for and what it lets them do, as far as the original says — a product
+  summary, not a task ("Internal HR system for employee and leave management").
+- Bio: a 2-4 sentence professional summary, no "I" and no name. Lead with the role,
+  then the projects and skills the original names; turn counts of hours or projects
+  into plain prose rather than leading with them.
 - Achievement: one clear sentence.
 - Fix spelling and grammar; keep any web link exactly as given; plain text only —
   no markdown, bullets or emojis. A point too vague to improve is lightly cleaned up,
