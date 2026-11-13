@@ -21,13 +21,14 @@ plugins:
       min_platform: "2026.11"
   - plugin_id: hrms
     name: HRMS
-    summary: Takes and decides leave requests, takes work-from-home and comp-off requests, onboards new employees for HR, and helps people set their MBOs and keep their weekly plan, in the company's HRMS, as the person asking.
-    version: 0.31.0
+    summary: Takes and decides leave requests, takes work-from-home and comp-off requests, onboards new employees for HR, helps people set their MBOs and keep their weekly plan, and drafts each week's resume updates for an HR administrator to approve, in the company's HRMS, as the person asking.
+    version: 0.32.0
     manifest: plugins/hrms/manifest.yaml
-    # Needs an EC platform that reads `confirm_free` in a manifest's mcp_servers
-    # (EC-D359, ec-core backend/app/plugins/manifest.py). An older platform
-    # refuses this manifest at install ("extra fields not permitted"): upgrade
-    # the platform first, or install HRMS 0.29.0.
+    # Needs an EC platform that reads `confirm_free` (EC-D359) and `unattended`
+    # (EC-D363) in a manifest's mcp_servers (ec-core backend/app/plugins/manifest.py).
+    # An older platform refuses this manifest at install ("extra fields not
+    # permitted"): upgrade the platform first, or install HRMS 0.31.0 (needs
+    # EC-D359 only) or 0.29.0.
     requires:
       connectors: []
       # Not in the build: a server an operator runs beside the platform. It never
@@ -59,9 +60,9 @@ plugins:
 mcp_servers:
   - server_id: hrms
     name: HRMS MCP server
-    summary: Leave, work-from-home, comp-off, MBO and onboarding tools in front of the HRMS — read, file, decide, set MBOs and create new employees — acting as the person asking; and a month's leave calendar for the client timesheet.
+    summary: Leave, work-from-home, comp-off, MBO and onboarding tools in front of the HRMS — read, file, decide, set MBOs, create new employees and stage weekly resume updates for approval — acting as the person asking; and a month's leave calendar for the client timesheet.
     source: plugins/hrms/mcp-server
-    image: ghcr.io/nh66labs/ec-hrms-mcp:0.34.2
+    image: ghcr.io/nh66labs/ec-hrms-mcp:0.35.0
 
 connectors:
   - connector_id: apollo

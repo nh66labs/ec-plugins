@@ -53,6 +53,7 @@ plugin in `index.yaml`.
 | Field | Platform change | Used by |
 |---|---|---|
 | `mcp_servers[].confirm_free` — writes that run in a person's turn without a confirmation card | EC-D359 | HRMS ≥ 0.31.0 (`save_resume_wording`) |
+| `mcp_servers[].unattended` — tools an agent's scheduled run may call as the person who set the schedule, with no card | EC-D363 | HRMS ≥ 0.32.0 (`list_resume_refresh_batch`, `save_resume_proposals`) |
 
 ## Adding a plugin
 
