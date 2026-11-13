@@ -73,7 +73,34 @@ def check_servers(
             problems.append(f"{rel}: MCP server {sid!r} has auth_mode {mode!r}")
         if mode == "signed_identity" and not str(server.get("lookup_path", "")).startswith("/"):
             problems.append(f"{rel}: MCP server {sid!r} is told who is asking but has no lookup_path")
+        for name in server.get("unattended") or []:
+            if name not in tools:
+                problems.append(f"{rel}: MCP server {sid!r} lists unattended tool {name!r}, not in its tools")
         declared.add(sid)
+    # An agent runs on a schedule with nobody at hand (EC-D363). On a server told who
+    # is asking, a tool of its that is not listed unattended is signed for no one
+    # there, so the run would only ever be refused: say so at publish time.
+    by_server = {s.get("server_id"): s for s in servers}
+    for agent in manifest.get("agents") or []:
+        for tool_id in agent.get("tools") or []:
+            parts = str(tool_id).split(":", 2)
+            if len(parts) != 3 or parts[0] != "mcp":
+                continue
+            server = by_server.get(parts[1])
+            if server is None:
+                continue
+            if parts[2] not in (server.get("tools") or []):
+                problems.append(
+                    f"{rel}: agent {agent.get('name')!r} uses {tool_id}, but MCP server "
+                    f"{parts[1]!r} has no tool {parts[2]!r}"
+                )
+            elif server.get("auth_mode") == "signed_identity" and parts[2] not in (
+                server.get("unattended") or []
+            ):
+                problems.append(
+                    f"{rel}: agent {agent.get('name')!r} uses {tool_id}, which is not listed "
+                    f"unattended, so a scheduled run could not call it"
+                )
     required = set((entry.get("requires") or {}).get("mcp_servers") or [])
     if required != declared:
         problems.append(
