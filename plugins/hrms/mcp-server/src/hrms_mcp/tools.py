@@ -125,6 +125,10 @@ async def _ask(hrms: Hrms, ctx: Context, tool: str, arguments: dict[str, Any]) -
     return result
 
 
+#: The public name for modules that call the HRMS as the person asking.
+ask = _ask
+
+
 def kind_of(value: str) -> str:
     """A leave type as a person reads it: ``CL`` → "Casual leave"."""
     value = str(value or "").strip()

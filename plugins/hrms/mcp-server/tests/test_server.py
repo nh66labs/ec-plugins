@@ -176,7 +176,7 @@ READS = {
     "start_wfh_request", "preview_wfh", "start_comp_off_request", "preview_comp_off",
     "get_new_employee_options", "check_new_employee", "where_to_upload_documents",
     "get_my_onboarding", "list_orientation_requests",
-    "list_onboardings", "get_onboarding_status", "get_resume",
+    "list_onboardings", "get_onboarding_status", "get_resume", "list_resume_refresh_batch",
 }
 WRITES = {
     "apply_leave", "cancel_my_leave", "approve_leave", "reject_leave", "save_my_mbo_plan",
@@ -185,7 +185,7 @@ WRITES = {
     "create_employee", "confirm_my_profile",
     "confirm_orientation", "complete_orientation",
     "retry_onboarding_step", "mark_onboarding_step_not_required", "require_onboarding_step",
-    "start_onboarding", "start_profile_update", "save_resume_wording",
+    "start_onboarding", "start_profile_update", "save_resume_wording", "save_resume_proposals",
 }
 
 

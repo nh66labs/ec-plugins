@@ -30,6 +30,7 @@ from hrms_mcp import (
     orientation,
     profile_update,
     resume,
+    resume_update,
     tools,
     wfh,
     writes,
@@ -65,6 +66,7 @@ def create_app(
     profile_update.register(server, hrms, settings.hr_assist_dashboard_url)
     onboarding_admin.register(server, hrms)
     resume.register(server, hrms)
+    resume_update.register(server, hrms)
     mbo.register(
         server, hrms, mbo.Guides.named(settings.mbo_acceptance_guide, settings.mbo_role_guide)
     )
